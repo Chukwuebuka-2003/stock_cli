@@ -1,0 +1,8 @@
+click==8.1.7
+yfinance==0.2.38
+pandas==2.1.4
+groq
+python-dateutil==2.8.2
+schedule==1.2.0
+python-dotenv==1.0.0
+alpha_vantage

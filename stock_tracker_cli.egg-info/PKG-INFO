@@ -1,0 +1,233 @@
+Metadata-Version: 2.4
+Name: stock-tracker-cli
+Version: 0.1.0
+Summary: A CLI tool to track stock portfolios and get AI-powered analysis.
+Author-email: Chukwuebuka Ezeokeke <ebulamicheal@gmail.com>
+Project-URL: Homepage, https://github.com/Chukwuebuka-2003/stock_cli
+Project-URL: Bug Tracker, https://github.com/Chukwuebuka-2003/stock_cli/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Office/Business :: Financial :: Investment
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: click==8.1.7
+Requires-Dist: alpha-vantage
+Requires-Dist: pandas==2.1.4
+Requires-Dist: groq>=0.9.0
+Requires-Dist: python-dateutil==2.8.2
+Requires-Dist: appdirs>=1.4.4
+Dynamic: license-file
+
+# Stock Tracker CLI
+
+A command-line tool to track your stock portfolio and get AI-powered investment analysis.
+
+## Features
+
+- 📊 **Portfolio Management**: Add and remove stock positions with purchase prices
+- 💹 **Real-time Data**: Fetch current stock prices using Alpha Vantage API
+- 🤖 **AI Analysis**: Get intelligent insights using Groq's LLM (llama-3.3-70b-versatile)
+- 📧 **Email Reports**: Send HTML-formatted reports with AI analysis via email
+- ⚡ **Smart Caching**: 15-minute cache to reduce API calls
+- 🐳 **Docker Support**: Containerized deployment with automated scheduled reports
+
+## Installation
+
+### From PyPI
+
+```bash
+pip install stock-tracker-cli
+```
+
+### From Source
+
+```bash
+git clone https://github.com/Chukwuebuka-2003/stock_cli.git
+cd stock_cli
+pip install -e .
+```
+
+## Quick Start
+
+### 1. Configure API Keys
+
+```bash
+# Setup Groq API key for AI analysis
+stock-tracker setup-ai
+
+# Setup Alpha Vantage API key for stock data
+stock-tracker setup-alpha-vantage
+
+# Setup email settings (optional, for email reports)
+stock-tracker setup-email
+```
+
+**Get Free API Keys:**
+- Groq: https://console.groq.com/
+- Alpha Vantage: https://www.alphavantage.co/support/#api-key
+
+### 2. Add Stock Positions
+
+```bash
+# Add a stock position
+stock-tracker add AAPL 10 150.00
+
+# Arguments: SYMBOL QUANTITY PURCHASE_PRICE
+stock-tracker add MSFT 5 300.00
+stock-tracker add GOOGL 3 2800.00
+```
+
+### 3. Generate Reports
+
+```bash
+# View portfolio report in terminal
+stock-tracker report
+
+# Get AI-powered analysis
+stock-tracker ai_report
+
+# Send AI report via email
+stock-tracker ai_report --email recipient@example.com
+```
+
+## Commands
+
+### Portfolio Management
+
+```bash
+# Add a stock position
+stock-tracker add <SYMBOL> <QUANTITY> <PURCHASE_PRICE>
+
+# Remove a stock position
+stock-tracker remove <SYMBOL>
+```
+
+### Reports
+
+```bash
+# Generate plain text report
+stock-tracker report
+
+# Generate AI-powered analysis report
+stock-tracker ai_report [--email EMAIL]
+```
+
+### Configuration
+
+```bash
+# Configure Groq API key
+stock-tracker setup-ai
+
+# Configure Alpha Vantage API key
+stock-tracker setup-alpha-vantage
+
+# Configure email settings
+stock-tracker setup-email
+```
+
+## Example Output
+
+```
+Stock Portfolio Report
+Generated on: 2025-11-09 10:30:00
+
+╔════════╦══════════╦════════════════╦═══════════════╦════════════╦═════════════════╗
+║ Symbol ║ Quantity ║ Purchase Price ║ Current Price ║    Value   ║ Gain/Loss (%)   ║
+╠════════╬══════════╬════════════════╬═══════════════╬════════════╬═════════════════╣
+║  AAPL  ║   10.0   ║    $150.00     ║    $178.50    ║  $1,785.00 ║ +$285.00 (+19%) ║
+║  MSFT  ║    5.0   ║    $300.00     ║    $385.20    ║  $1,926.00 ║ +$426.00 (+28%) ║
+║ GOOGL  ║    3.0   ║   $2,800.00    ║   $2,950.00   ║  $8,850.00 ║ +$450.00 (+5%)  ║
+╚════════╩══════════╩════════════════╩═══════════════╩════════════╩═════════════════╝
+
+Portfolio Summary:
+Total Value: $12,561.00
+Total Gain/Loss: +$1,161.00 (+10.2%)
+```
+
+## Docker Deployment
+
+### Build and Run
+
+```bash
+# Build the image
+docker-compose build
+
+# Run one-time report
+docker-compose run stock-tracker stock-tracker report
+
+# Run with scheduled reports (daily at 4:30 PM UTC on weekdays)
+docker-compose up -d cron
+```
+
+### Environment Variables
+
+Create a `.env` file:
+
+```env
+GROQ_API_KEY=your_groq_api_key
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+EMAIL_SMTP_SERVER=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USERNAME=your_email@gmail.com
+EMAIL_PASSWORD=your_app_password
+EMAIL_RECIPIENT=recipient@example.com
+```
+
+## Configuration Files
+
+The CLI stores data in platform-specific directories:
+
+- **Linux**: `~/.config/StockTrackerCLI/` and `~/.local/share/StockTrackerCLI/`
+- **macOS**: `~/Library/Application Support/StockTrackerCLI/`
+- **Windows**: `%LOCALAPPDATA%\StockTrackerCLI\`
+
+### Files:
+- `config.json` - API keys and email settings
+- `positions.json` - Your stock positions
+- `cache.json` - Cached stock data (15-minute expiry)
+- `logs/stock_tracker.log` - Application logs
+
+## Requirements
+
+- Python 3.8 or higher
+- Internet connection for API access
+- API keys:
+  - Groq API (for AI analysis)
+  - Alpha Vantage API (for stock data)
+- SMTP server access (optional, for email reports)
+
+## Dependencies
+
+- click - CLI framework
+- pandas - Data manipulation
+- groq - AI inference
+- alpha-vantage - Stock data API
+- python-dateutil - Date utilities
+- appdirs - Cross-platform directories
+
+## Gmail Setup
+
+For Gmail users, you'll need to use an App Password:
+
+1. Enable 2-factor authentication on your Google account
+2. Go to https://myaccount.google.com/apppasswords
+3. Generate an app password for "Mail"
+4. Use this app password when running `stock-tracker setup-email`
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Author
+
+Chukwuebuka Ezeokeke - [GitHub](https://github.com/Chukwuebuka-2003)
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Issues
+
+Found a bug? Please report it on the [GitHub Issues](https://github.com/Chukwuebuka-2003/stock_cli/issues) page.

@@ -1,0 +1,2 @@
+[console_scripts]
+stock-tracker = src.cli:cli
