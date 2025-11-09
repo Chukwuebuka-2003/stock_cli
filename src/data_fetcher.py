@@ -5,7 +5,7 @@ import time
 
 from alpha_vantage.timeseries import TimeSeries
 
-from .file_paths import CACHE_PATH
+from stock_cli.file_paths import CACHE_PATH
 
 logger = logging.getLogger(__name__)
 

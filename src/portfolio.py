@@ -1,7 +1,7 @@
 import json
 import logging
 
-from .file_paths import POSITIONS_PATH
+from stock_cli.file_paths import POSITIONS_PATH
 
 logger = logging.getLogger(__name__)
 

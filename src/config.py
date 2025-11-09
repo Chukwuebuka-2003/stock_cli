@@ -2,7 +2,7 @@ import json
 import logging
 import os
 
-from .file_paths import CONFIG_PATH
+from stock_cli.file_paths import CONFIG_PATH
 
 logger = logging.getLogger(__name__)
 

@@ -64,10 +64,10 @@ stock-tracker add GOOGL 3 2800.00
 stock-tracker report
 
 # Get AI-powered analysis
-stock-tracker ai_report
+stock-tracker ai-report
 
 # Send AI report via email
-stock-tracker ai_report --email recipient@example.com
+stock-tracker ai-report --email recipient@example.com
 ```
 
 ## Commands
@@ -89,7 +89,7 @@ stock-tracker remove <SYMBOL>
 stock-tracker report
 
 # Generate AI-powered analysis report
-stock-tracker ai_report [--email EMAIL]
+stock-tracker ai-report [--email EMAIL]
 ```
 
 ### Configuration
