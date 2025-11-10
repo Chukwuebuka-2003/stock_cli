@@ -77,9 +77,28 @@ class Reporting:
 
         return "\n".join(rows) + summary
 
-    def generate_html_report(self, portfolio, data_fetcher, ai_analysis=""):
+    def generate_html_report(self, portfolio, data_fetcher, ai_analysis="", market_events=None):
         """Generate a styled HTML report, perfect for emails."""
         report_data = self._get_report_data(portfolio, data_fetcher)
+
+        # Market Events HTML Formatting (shown first if present)
+        events_html = ""
+        if market_events and market_events.get("symbol_events"):
+            events_html = '<div class="events-card"><h2>📰 Market Events Detected</h2>'
+            events_html += '<p style="color: #666; font-size: 14px;">This report was triggered by significant market events affecting your portfolio:</p>'
+
+            for symbol, events in market_events["symbol_events"].items():
+                events_html += f'<div style="margin: 15px 0;"><h3 style="color: #1a73e8; margin-bottom: 10px;">{symbol}</h3>'
+                for event in events[:3]:  # Limit to top 3 events per symbol
+                    events_html += f'''
+                    <div style="border-left: 3px solid #1a73e8; padding-left: 15px; margin-bottom: 15px;">
+                        <p style="font-weight: bold; margin: 5px 0;">{event.get("title", "")}</p>
+                        <p style="margin: 5px 0; color: #666;">{event.get("content", "")[:200]}...</p>
+                        <p style="margin: 5px 0;"><a href="{event.get("url", "")}" style="color: #1a73e8;">Read more →</a></p>
+                    </div>
+                    '''
+                events_html += '</div>'
+            events_html += '</div>'
 
         # AI Analysis HTML Formatting
         ai_html = ""
@@ -122,12 +141,14 @@ class Reporting:
             th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
             th {{ background-color: #f2f2f2; }}
             .summary-card, .analysis-card {{ background-color: #f9f9f9; border: 1px solid #eee; border-radius: 8px; padding: 15px; margin-top: 20px; }}
+            .events-card {{ background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px; }}
             b {{ color: #1a73e8; }}
         </style>
         </head>
         <body>
             <div class="container">
                 <h1>Stock Portfolio Report</h1>
+                {events_html}
                 <h2>Portfolio Overview</h2>
                 <table>
                     <thead>
