@@ -21,6 +21,7 @@ jobs:
     outputs:
       should_generate_report: ${{ steps.check-events.outputs.should_report }}
       events_summary: ${{ steps.check-events.outputs.summary }}
+      events_json: ${{ steps.check-events.outputs.events_json }}
 
     steps:
       - name: Checkout repository
@@ -92,6 +93,13 @@ jobs:
           summary_escaped = summary.replace('\n', '%0A').replace('\r', '')
           print(f"summary={summary_escaped}", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
 
+          # Save full events data as JSON for the report
+          events_json = json.dumps(result)
+          # Escape for GitHub Actions output (replace newlines and quotes)
+          events_json_escaped = events_json.replace('\n', ' ').replace('"', '\\"')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'events_json<<EOF\n{events_json}\nEOF\n')
+
           # Print events summary
           print("\n" + summary)
 
@@ -153,7 +161,8 @@ jobs:
           echo ""
 
           # Generate AI report with market event context
-          stock-tracker ai-report --email
+          # Pass events JSON to include in email report
+          stock-tracker ai-report --email --events '${{ needs.check-events.outputs.events_json }}'
 
           echo "✅ Event-triggered report generated and sent successfully!"
 

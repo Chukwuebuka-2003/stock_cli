@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 
@@ -66,7 +67,12 @@ def report():
 @click.option(
     "--email", is_flag=True, help="Send the report to the configured email address."
 )
-def ai_report(email):
+@click.option(
+    "--events",
+    default=None,
+    help="JSON string of market events that triggered this report (for event-based reporting)."
+)
+def ai_report(email, events):
     """Generate an AI-powered analysis of your portfolio"""
     config = Config()
     alpha_vantage_key = config.get("alpha_vantage_api_key")
@@ -85,6 +91,16 @@ def ai_report(email):
     data_fetcher = DataFetcher(api_key=alpha_vantage_key)
     reporting = Reporting(config)
 
+    # Parse events if provided
+    market_events = None
+    if events:
+        try:
+            market_events = json.loads(events)
+            logger.info("Loaded market events for event-based report")
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing events JSON: {e}")
+            click.echo("⚠️  Warning: Could not parse market events data")
+
     # Generate the text report for console display
     text_report = reporting.generate_text_report(portfolio, data_fetcher)
     ai_analyzer = AIAnalyzer(api_key=groq_key)
@@ -99,9 +115,13 @@ def ai_report(email):
     if email:
         click.echo("\nSending email with HTML report...")
         html_report = reporting.generate_html_report(
-            portfolio, data_fetcher, ai_analysis=analysis
+            portfolio, data_fetcher, ai_analysis=analysis, market_events=market_events
         )
-        success = reporting.send_email_report(html_report, "AI-Powered")
+
+        # Determine report type based on whether events were provided
+        report_type = "Event-Triggered" if market_events else "AI-Powered"
+
+        success = reporting.send_email_report(html_report, report_type)
         if success:
             click.echo("✅ Email sent successfully!")
         else:
