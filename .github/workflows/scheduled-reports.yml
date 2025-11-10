@@ -1,0 +1,112 @@
+name: Scheduled Stock Reports
+
+on:
+  schedule:
+    # Daily report - 8:00 AM UTC (before US market opens)
+    - cron: '0 8 * * 1-5'  # Weekdays only
+
+    # Weekly report - Every Monday at 6:00 AM UTC
+    - cron: '0 6 * * 1'
+
+    # Monthly report - First day of each month at 7:00 AM UTC
+    - cron: '0 7 1 * *'
+
+  # Allow manual trigger with options
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: 'Type of report to generate'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - weekly
+          - monthly
+          - custom
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Determine report type
+        id: report-type
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "type=${{ github.event.inputs.report_type }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 8 * * 1-5" ]; then
+            echo "type=daily" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 6 * * 1" ]; then
+            echo "type=weekly" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 7 1 * *" ]; then
+            echo "type=monthly" >> $GITHUB_OUTPUT
+          else
+            echo "type=daily" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate and send AI-powered report
+        env:
+          # API Keys
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+
+          # Email Configuration
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+
+          # Portfolio Data (injected from GitHub Secrets)
+          PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+
+          # Report Type
+          REPORT_TYPE: ${{ steps.report-type.outputs.type }}
+        run: |
+          echo "📊 Generating $REPORT_TYPE stock portfolio report..."
+
+          # Generate AI report and send via email
+          stock-tracker ai-report --email
+
+          echo "✅ Report generated and sent successfully!"
+
+      - name: Report generation summary
+        if: always()
+        run: |
+          echo "### 📈 Report Generation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Report Type:** ${{ steps.report-type.outputs.type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Report successfully generated and sent to configured email!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Report generation failed. Check the logs above." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-logs-${{ steps.report-type.outputs.type }}-${{ github.run_number }}
+          path: logs/
+          retention-days: 7

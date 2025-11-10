@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 
 from stock_cli.file_paths import POSITIONS_PATH
 
@@ -18,7 +19,22 @@ class Portfolio:
         self.positions = self.load_positions()
 
     def load_positions(self):
-        """Load positions from a JSON file."""
+        """
+        Load positions from environment variable or JSON file.
+        Priority: PORTFOLIO_POSITIONS env var -> positions.json file
+        """
+        # First, check if positions are provided via environment variable
+        env_positions = os.getenv("PORTFOLIO_POSITIONS")
+        if env_positions:
+            try:
+                positions = json.loads(env_positions)
+                logger.info("Loaded portfolio positions from PORTFOLIO_POSITIONS environment variable")
+                return positions
+            except json.JSONDecodeError as e:
+                logger.error(f"Error decoding PORTFOLIO_POSITIONS environment variable: {e}")
+                logger.info("Falling back to positions file...")
+
+        # Fall back to loading from file
         try:
             with open(self.positions_path, "r") as f:
                 return json.load(f)

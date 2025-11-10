@@ -27,6 +27,9 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY . .
 
+# Install the package in development mode so stock-tracker command is available
+RUN pip install -e .
+
 # Create logs directory and set permissions
 RUN mkdir -p logs && \
     chmod -R 755 logs
@@ -41,5 +44,6 @@ USER appuser
 # Expose port (if needed for web interface in future)
 EXPOSE 8000
 
-# Default command
-CMD ["python", "stock_tracker.py", "health_check"]
+# Default command - can be overridden
+ENTRYPOINT ["stock-tracker"]
+CMD ["--help"]

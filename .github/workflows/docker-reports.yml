@@ -1,0 +1,85 @@
+name: Docker-Based Stock Reports
+
+on:
+  schedule:
+    # Daily report using Docker - 8:30 AM UTC
+    - cron: '30 8 * * 1-5'
+
+  workflow_dispatch:
+    inputs:
+      report_command:
+        description: 'Stock tracker command to run'
+        required: true
+        default: 'ai-report --email'
+        type: string
+
+jobs:
+  docker-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t stock-tracker:latest .
+
+      - name: Run stock tracker in Docker
+        env:
+          # API Keys
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+
+          # Email Configuration
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+
+          # Portfolio Data
+          PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+        run: |
+          COMMAND="${{ github.event.inputs.report_command }}"
+          if [ -z "$COMMAND" ]; then
+            COMMAND="ai-report --email"
+          fi
+
+          echo "🐳 Running stock-tracker command in Docker: $COMMAND"
+
+          docker run --rm \
+            -e GROQ_API_KEY="$GROQ_API_KEY" \
+            -e ALPHA_VANTAGE_API_KEY="$ALPHA_VANTAGE_API_KEY" \
+            -e TAVILY_API_KEY="$TAVILY_API_KEY" \
+            -e EMAIL_SMTP_SERVER="$EMAIL_SMTP_SERVER" \
+            -e EMAIL_SMTP_PORT="$EMAIL_SMTP_PORT" \
+            -e EMAIL_ADDRESS="$EMAIL_ADDRESS" \
+            -e EMAIL_PASSWORD="$EMAIL_PASSWORD" \
+            -e EMAIL_RECIPIENT="$EMAIL_RECIPIENT" \
+            -e PORTFOLIO_POSITIONS="$PORTFOLIO_POSITIONS" \
+            stock-tracker:latest \
+            stock-tracker $COMMAND
+
+          echo "✅ Docker-based report completed successfully!"
+
+      - name: Docker report summary
+        if: always()
+        run: |
+          echo "### 🐳 Docker-Based Report Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Command:** \`${{ github.event.inputs.report_command || 'ai-report --email' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Docker-based report successfully completed!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Docker-based report failed. Check the logs above." >> $GITHUB_STEP_SUMMARY
+          fi

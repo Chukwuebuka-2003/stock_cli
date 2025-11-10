@@ -19,16 +19,55 @@ class Config:
         self.config = self.load_config()
 
     def load_config(self):
-        """Load configuration from a JSON file."""
+        """
+        Load configuration from environment variables or JSON file.
+        Priority: Environment variables -> config.json file
+        """
+        config = {}
+
+        # First, try to load from file
         try:
             with open(self.config_path, "r") as f:
-                return json.load(f)
+                config = json.load(f)
+                logger.info("Loaded configuration from file")
         except FileNotFoundError:
-            logger.warning("Config file not found. Creating a default config.")
-            return self.create_default_config()
+            logger.warning("Config file not found. Will use environment variables or defaults.")
+            config = self.create_default_config()
         except json.JSONDecodeError:
-            logger.error("Error decoding config.json. Starting with a default config.")
-            return self.create_default_config()
+            logger.error("Error decoding config.json. Will use environment variables or defaults.")
+            config = self.create_default_config()
+
+        # Override with environment variables if present
+        if os.getenv("GROQ_API_KEY"):
+            config["groq_api_key"] = os.getenv("GROQ_API_KEY")
+            logger.info("Using GROQ_API_KEY from environment variable")
+
+        if os.getenv("ALPHA_VANTAGE_API_KEY"):
+            config["alpha_vantage_api_key"] = os.getenv("ALPHA_VANTAGE_API_KEY")
+            logger.info("Using ALPHA_VANTAGE_API_KEY from environment variable")
+
+        if os.getenv("TAVILY_API_KEY"):
+            config["tavily_api_key"] = os.getenv("TAVILY_API_KEY")
+            logger.info("Using TAVILY_API_KEY from environment variable")
+
+        # Override email settings with environment variables if present
+        email_settings = config.get("email_settings", {})
+        if os.getenv("EMAIL_SMTP_SERVER"):
+            email_settings["smtp_server"] = os.getenv("EMAIL_SMTP_SERVER")
+        if os.getenv("EMAIL_SMTP_PORT"):
+            email_settings["smtp_port"] = int(os.getenv("EMAIL_SMTP_PORT"))
+        if os.getenv("EMAIL_ADDRESS"):
+            email_settings["email"] = os.getenv("EMAIL_ADDRESS")
+        if os.getenv("EMAIL_PASSWORD"):
+            email_settings["password"] = os.getenv("EMAIL_PASSWORD")
+        if os.getenv("EMAIL_RECIPIENT"):
+            email_settings["recipient"] = os.getenv("EMAIL_RECIPIENT")
+
+        if any(email_settings.values()):
+            config["email_settings"] = email_settings
+            logger.info("Using email settings from environment variables")
+
+        return config
 
     def create_default_config(self):
         """Create a default configuration."""
