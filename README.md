@@ -10,6 +10,8 @@ A command-line tool to track your stock portfolio and get AI-powered investment 
 - 📧 **Email Reports**: Send HTML-formatted reports with AI analysis via email
 - ⚡ **Smart Caching**: 15-minute cache to reduce API calls
 - 🐳 **Docker Support**: Containerized deployment with automated scheduled reports
+- 🚨 **GitHub Actions Automation**: Scheduled and event-based reporting with Tavily API integration
+- 📰 **Market Event Detection**: Automatically trigger reports when significant market events affect your portfolio
 
 ## Installation
 
@@ -124,19 +126,76 @@ Total Value: $12,561.00
 Total Gain/Loss: +$1,161.00 (+10.2%)
 ```
 
+## GitHub Actions Automation ⚡
+
+**NEW!** Automate your stock reports with GitHub Actions - no server required!
+
+### Features
+
+- 📅 **Scheduled Reports**: Daily, weekly, and monthly automated reports
+- 🚨 **Event-Based Triggers**: Automatically generate reports when market events affect your portfolio
+- 🔒 **Secure**: All credentials stored in GitHub Secrets
+- 📧 **Email Delivery**: Reports sent directly to your inbox
+- 🐳 **Docker Execution**: Containerized workflows for consistency
+
+### Quick Setup
+
+1. **Configure GitHub Secrets** (Settings → Secrets → Actions):
+   ```
+   GROQ_API_KEY
+   ALPHA_VANTAGE_API_KEY
+   TAVILY_API_KEY
+   EMAIL_SMTP_SERVER
+   EMAIL_SMTP_PORT
+   EMAIL_ADDRESS
+   EMAIL_PASSWORD
+   EMAIL_RECIPIENT
+   PORTFOLIO_POSITIONS
+   ```
+
+2. **Set Portfolio Positions** (JSON format):
+   ```json
+   [{"symbol":"AAPL","quantity":10,"purchase_price":150.0},{"symbol":"GOOGL","quantity":5,"purchase_price":2800.0}]
+   ```
+
+3. **Enable GitHub Actions** in your repository settings
+
+4. **Done!** Reports will be automatically generated and emailed on schedule
+
+### Workflows
+
+- **Scheduled Reports**: Daily (8 AM UTC), Weekly (Mon 6 AM), Monthly (1st at 7 AM)
+- **Event-Based**: Checks every 2 hours for market events affecting your portfolio
+- **Docker-Based**: Containerized execution (8:30 AM UTC daily)
+
+### Get Started
+
+📖 **[Complete Setup Guide](GITHUB_ACTIONS_SETUP.md)** - Detailed instructions with troubleshooting
+
+**Get Tavily API Key**: https://tavily.com (Free tier: 1,000 credits/month)
+
+---
+
 ## Docker Deployment
 
 ### Build and Run
 
 ```bash
 # Build the image
-docker-compose build
+docker build -t stock-tracker:latest .
 
 # Run one-time report
-docker-compose run stock-tracker stock-tracker report
+docker run --rm stock-tracker:latest report
 
-# Run with scheduled reports (daily at 4:30 PM UTC on weekdays)
-docker-compose up -d cron
+# Run AI report with email
+docker run --rm \
+  -e GROQ_API_KEY="your_key" \
+  -e ALPHA_VANTAGE_API_KEY="your_key" \
+  -e EMAIL_ADDRESS="your@gmail.com" \
+  -e EMAIL_PASSWORD="app_password" \
+  -e EMAIL_RECIPIENT="recipient@example.com" \
+  -e PORTFOLIO_POSITIONS='[{"symbol":"AAPL","quantity":10,"purchase_price":150}]' \
+  stock-tracker:latest ai-report --email
 ```
 
 ### Environment Variables
@@ -146,11 +205,13 @@ Create a `.env` file:
 ```env
 GROQ_API_KEY=your_groq_api_key
 ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+TAVILY_API_KEY=your_tavily_api_key
 EMAIL_SMTP_SERVER=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USERNAME=your_email@gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_ADDRESS=your_email@gmail.com
 EMAIL_PASSWORD=your_app_password
 EMAIL_RECIPIENT=recipient@example.com
+PORTFOLIO_POSITIONS=[{"symbol":"AAPL","quantity":10,"purchase_price":150.0}]
 ```
 
 ## Configuration Files
@@ -182,8 +243,11 @@ The CLI stores data in platform-specific directories:
 - pandas - Data manipulation
 - groq - AI inference
 - alpha-vantage - Stock data API
+- tavily-python - Market event detection and news search
 - python-dateutil - Date utilities
 - appdirs - Cross-platform directories
+- schedule - Task scheduling
+- python-dotenv - Environment variable management
 
 ## Gmail Setup
 

@@ -1,0 +1,184 @@
+name: Event-Based Stock Reports
+
+on:
+  schedule:
+    # Check for market events every 2 hours during trading days
+    - cron: '0 */2 * * 1-5'  # Every 2 hours, weekdays only
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      force_report:
+        description: 'Force report generation regardless of events'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  check-events:
+    runs-on: ubuntu-latest
+
+    outputs:
+      should_generate_report: ${{ steps.check-events.outputs.should_report }}
+      events_summary: ${{ steps.check-events.outputs.summary }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check for market events
+        id: check-events
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+        run: |
+          python << 'EOF'
+          import json
+          import os
+          import sys
+
+          # Add src to path
+          sys.path.insert(0, 'src')
+
+          from market_events import check_portfolio_events
+
+          # Load portfolio positions from environment
+          positions_json = os.getenv("PORTFOLIO_POSITIONS", "[]")
+          positions = json.loads(positions_json)
+
+          if not positions:
+              print("⚠️ No portfolio positions configured")
+              print("should_report=false", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+              print("summary=No portfolio positions configured", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+              sys.exit(0)
+
+          print(f"📊 Checking market events for {len(positions)} portfolio positions...")
+
+          # Check for events
+          result = check_portfolio_events(positions)
+
+          if not result:
+              print("⚠️ Tavily API not configured or unavailable")
+              print("should_report=false", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+              print("summary=Tavily API not configured", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+              sys.exit(0)
+
+          # Determine if we should generate a report
+          should_report = result.get("should_trigger_report", False)
+          force_report = os.getenv("FORCE_REPORT", "false").lower() == "true"
+
+          if should_report or force_report:
+              print("✅ Significant market events detected! Triggering report...")
+              print(f"should_report=true", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+          else:
+              print("ℹ️ No significant market events detected. Skipping report.")
+              print(f"should_report=false", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+
+          # Save summary
+          summary = result.get("summary", "No events detected")
+          # Escape newlines for GitHub Actions output
+          summary_escaped = summary.replace('\n', '%0A').replace('\r', '')
+          print(f"summary={summary_escaped}", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+
+          # Print events summary
+          print("\n" + summary)
+
+          EOF
+
+      - name: Event check summary
+        run: |
+          echo "### 📰 Market Event Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Should Generate Report:** ${{ steps.check-events.outputs.should_report }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Events Detected:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.check-events.outputs.summary }}" >> $GITHUB_STEP_SUMMARY
+
+  generate-report:
+    needs: check-events
+    if: needs.check-events.outputs.should_generate_report == 'true' || github.event.inputs.force_report == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate event-triggered AI report
+        env:
+          # API Keys
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+
+          # Email Configuration
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+
+          # Portfolio Data
+          PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+        run: |
+          echo "🚨 Generating event-triggered stock portfolio report..."
+          echo ""
+          echo "Events Summary:"
+          echo "${{ needs.check-events.outputs.events_summary }}"
+          echo ""
+
+          # Generate AI report with market event context
+          stock-tracker ai-report --email
+
+          echo "✅ Event-triggered report generated and sent successfully!"
+
+      - name: Report generation summary
+        if: always()
+        run: |
+          echo "### 🚨 Event-Triggered Report Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** Market events detected" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Market Events:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${{ needs.check-events.outputs.events_summary }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Event-triggered report successfully generated and sent!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Report generation failed. Check the logs above." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: event-report-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
