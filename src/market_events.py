@@ -102,15 +102,15 @@ class MarketEventDetector:
                 # Get company name for better search
                 company_name = COMPANY_NAMES.get(symbol, symbol)
 
-                # Improved search query with company name
-                query = f'"{company_name}" OR {symbol} stock earnings news announcement'
+                # Improved search query with company name and proper grouping
+                query = f'("{company_name}" OR {symbol}) stock earnings news announcement'
 
                 response = self.client.search(
                     query=query,
                     topic="news",
                     days=days,
                     search_depth=search_depth,
-                    max_results=10,  # Get more results for filtering
+                    max_results=10,  # Fetch 10 results to apply quality filtering before selecting top 3
                     include_domains=TRUSTED_DOMAINS  # Only trusted sources
                 )
 
@@ -257,11 +257,10 @@ class MarketEventDetector:
                 return False
 
         # Check for navigation elements
+        # Only fail if these appear in the first 100 characters (likely navigation)
         nav_keywords = ['calendar', 'dividend calculator', 'earnings calendar', 'market holidays']
-        if any(keyword in content_lower for keyword in nav_keywords):
-            # Only fail if these appear in the first 100 characters (likely navigation)
-            if any(keyword in content_lower[:100] for keyword in nav_keywords):
-                return False
+        if any(keyword in content_lower for keyword in nav_keywords) and any(keyword in content_lower[:100] for keyword in nav_keywords):
+            return False
 
         return True
 
@@ -283,16 +282,10 @@ class MarketEventDetector:
         symbol_lower = symbol.lower()
         company_lower = company_name.lower()
 
-        # Must mention symbol OR company name in title
-        if symbol_lower in title_lower or company_lower in title_lower:
-            return True
-
-        # Or in the first 300 characters of content (above the fold)
+        # Must mention symbol OR company name in title or first 300 characters of content
         content_preview = content_lower[:300]
-        if symbol_lower in content_preview or company_lower in content_preview:
-            return True
-
-        return False
+        return (symbol_lower in title_lower or company_lower in title_lower or
+                symbol_lower in content_preview or company_lower in content_preview)
 
     def _clean_content(self, content: str) -> str:
         """
