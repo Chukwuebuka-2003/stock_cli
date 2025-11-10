@@ -24,12 +24,31 @@ class Portfolio:
         Priority: PORTFOLIO_POSITIONS env var -> positions.json file
         """
         # First, check if positions are provided via environment variable
-        env_positions = os.getenv("PORTFOLIO_POSITIONS")
-        if env_positions:
+        if env_positions := os.getenv("PORTFOLIO_POSITIONS"):
             try:
                 positions = json.loads(env_positions)
-                logger.info("Loaded portfolio positions from PORTFOLIO_POSITIONS environment variable")
-                return positions
+                # Validate structure of positions
+                if not isinstance(positions, list):
+                    logger.error("PORTFOLIO_POSITIONS must be a JSON array")
+                    logger.info("Falling back to positions file...")
+                else:
+                    # Validate each position has required fields
+                    valid_positions = []
+                    for pos in positions:
+                        if not isinstance(pos, dict):
+                            logger.warning(f"Skipping invalid position (not a dict): {pos}")
+                            continue
+                        if not all(key in pos for key in ["symbol", "quantity", "purchase_price"]):
+                            logger.warning(f"Skipping position with missing fields: {pos}")
+                            continue
+                        valid_positions.append(pos)
+
+                    if valid_positions:
+                        logger.info(f"Loaded {len(valid_positions)} valid portfolio positions from PORTFOLIO_POSITIONS environment variable")
+                        return valid_positions
+                    else:
+                        logger.warning("No valid positions found in PORTFOLIO_POSITIONS environment variable")
+                        logger.info("Falling back to positions file...")
             except json.JSONDecodeError as e:
                 logger.error(f"Error decoding PORTFOLIO_POSITIONS environment variable: {e}")
                 logger.info("Falling back to positions file...")

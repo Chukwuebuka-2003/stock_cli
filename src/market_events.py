@@ -7,6 +7,7 @@ when significant events are detected related to portfolio holdings.
 import json
 import logging
 import os
+import re
 from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -71,8 +72,7 @@ class MarketEventDetector:
                     max_results=5
                 )
 
-                events = self._extract_events(response, symbol)
-                if events:
+                if events := self._extract_events(response, symbol):
                     events_by_symbol[symbol] = events
                     logger.info(f"Found {len(events)} events for {symbol}")
 
@@ -133,6 +133,11 @@ class MarketEventDetector:
             List of formatted event dictionaries
         """
         events = []
+
+        # Validate response is a dict
+        if not isinstance(response, dict):
+            logger.error(f"Invalid response type: expected dict, got {type(response)}")
+            return events
 
         # Extract results from response
         results = response.get("results", [])
@@ -198,12 +203,31 @@ class MarketEventDetector:
         for symbol, events in events_by_symbol.items():
             summary_lines.append(f"**{symbol}**:")
             for event in events[:3]:  # Limit to top 3 events per symbol
-                summary_lines.append(f"  • {event['title']}")
-                summary_lines.append(f"    {event['content'][:150]}...")
-                summary_lines.append(f"    🔗 {event['url']}")
-                summary_lines.append("")
+                summary_lines.extend(
+                    (
+                        f"  • {event['title']}",
+                        f"    {event['content'][:150]}...",
+                        f"    🔗 {event['url']}",
+                        "",
+                    )
+                )
 
         return "\n".join(summary_lines)
+
+
+def _is_valid_symbol(symbol: str) -> bool:
+    """
+    Validate stock symbol format.
+
+    Args:
+        symbol: Stock symbol to validate
+
+    Returns:
+        True if symbol is valid, False otherwise
+    """
+    # Allow uppercase alphanumeric, 1-5 chars (standard US stock symbols)
+    # Can be adjusted for international symbols if needed
+    return bool(re.fullmatch(r"[A-Z0-9]{1,5}", symbol))
 
 
 def check_portfolio_events(portfolio_positions: List[Dict]) -> Optional[Dict]:
@@ -221,11 +245,19 @@ def check_portfolio_events(portfolio_positions: List[Dict]) -> Optional[Dict]:
     if not detector.client:
         return None
 
-    # Extract symbols from positions
-    symbols = [pos["symbol"].upper() for pos in portfolio_positions if "symbol" in pos]
+    # Extract symbols from positions, validate and deduplicate
+    raw_symbols = [pos["symbol"].upper() for pos in portfolio_positions if "symbol" in pos]
+
+    # Deduplicate and validate
+    symbols = list({s for s in raw_symbols if _is_valid_symbol(s)})
+
+    # Log any invalid symbols
+    invalid_symbols = set(raw_symbols) - set(symbols)
+    if invalid_symbols:
+        logger.warning(f"Skipping invalid symbols: {invalid_symbols}")
 
     if not symbols:
-        logger.warning("No symbols found in portfolio positions")
+        logger.warning("No valid symbols found in portfolio positions")
         return None
 
     # Check for events

@@ -55,7 +55,11 @@ class Config:
         if os.getenv("EMAIL_SMTP_SERVER"):
             email_settings["smtp_server"] = os.getenv("EMAIL_SMTP_SERVER")
         if os.getenv("EMAIL_SMTP_PORT"):
-            email_settings["smtp_port"] = int(os.getenv("EMAIL_SMTP_PORT"))
+            try:
+                email_settings["smtp_port"] = int(os.getenv("EMAIL_SMTP_PORT"))
+            except ValueError:
+                logger.error(f"Invalid EMAIL_SMTP_PORT value: {os.getenv('EMAIL_SMTP_PORT')}. Using default 587.")
+                email_settings["smtp_port"] = 587
         if os.getenv("EMAIL_ADDRESS"):
             email_settings["email"] = os.getenv("EMAIL_ADDRESS")
         if os.getenv("EMAIL_PASSWORD"):
