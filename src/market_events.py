@@ -12,6 +12,44 @@ from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# Company name mapping for better search accuracy
+COMPANY_NAMES = {
+    "NVDA": "Nvidia",
+    "AAPL": "Apple",
+    "GOOGL": "Google Alphabet",
+    "MSFT": "Microsoft",
+    "TSLA": "Tesla",
+    "AMZN": "Amazon",
+    "META": "Meta Facebook",
+    "POET": "POET Technologies",
+    "AMPX": "Amprius Technologies",
+    "RZLV": "Rezolve AI",
+    "WULF": "TeraWulf",
+    # Add more as needed
+}
+
+# Trusted financial news domains for quality filtering
+TRUSTED_DOMAINS = [
+    'bloomberg.com',
+    'reuters.com',
+    'cnbc.com',
+    'marketwatch.com',
+    'seekingalpha.com',
+    'fool.com',
+    'barrons.com',
+    'wsj.com',
+    'finance.yahoo.com',
+    'investing.com',
+    'benzinga.com',
+    'tipranks.com',
+    'zacks.com',
+    'morningstar.com',
+    'thestreet.com',
+    'businesswire.com',
+    'prnewswire.com',
+    'globenewswire.com',
+]
+
 
 class MarketEventDetector:
     """Detect market events using Tavily API."""
@@ -61,20 +99,25 @@ class MarketEventDetector:
 
         for symbol in symbols:
             try:
-                # Search for news about this specific stock
-                query = f"{symbol} stock market news earnings"
+                # Get company name for better search
+                company_name = COMPANY_NAMES.get(symbol, symbol)
+
+                # Improved search query with company name and proper grouping
+                query = f'("{company_name}" OR {symbol}) stock earnings news announcement'
 
                 response = self.client.search(
                     query=query,
                     topic="news",
                     days=days,
                     search_depth=search_depth,
-                    max_results=5
+                    max_results=10,  # Fetch 10 results to apply quality filtering before selecting top 3
+                    include_domains=TRUSTED_DOMAINS  # Only trusted sources
                 )
 
-                if events := self._extract_events(response, symbol):
+                # Extract and filter events for relevance
+                if events := self._extract_and_filter_events(response, symbol, company_name):
                     events_by_symbol[symbol] = events
-                    logger.info(f"Found {len(events)} events for {symbol}")
+                    logger.info(f"Found {len(events)} relevant events for {symbol}")
 
             except Exception as e:
                 logger.error(f"Error checking events for {symbol}: {e}")
@@ -121,16 +164,17 @@ class MarketEventDetector:
             logger.error(f"Error checking general market events: {e}")
             return []
 
-    def _extract_events(self, response: Dict, symbol: str) -> List[Dict]:
+    def _extract_and_filter_events(self, response: Dict, symbol: str, company_name: str) -> List[Dict]:
         """
-        Extract and format events from Tavily API response.
+        Extract and filter events from Tavily API response for quality and relevance.
 
         Args:
             response: Raw response from Tavily API
             symbol: Stock symbol associated with these events
+            company_name: Company name for relevance checking
 
         Returns:
-            List of formatted event dictionaries
+            List of high-quality, relevant event dictionaries
         """
         events = []
 
@@ -143,32 +187,138 @@ class MarketEventDetector:
         results = response.get("results", [])
 
         for result in results:
+            title = result.get("title", "")
+            content = result.get("content", "")
+            url = result.get("url", "")
+            score = result.get("score", 0.0)
+
+            # Quality checks
+            if not self._is_quality_content(title, content, url):
+                logger.debug(f"Skipping low-quality content: {title[:50]}...")
+                continue
+
+            # Relevance check - must mention the stock or company
+            if not self._is_relevant_to_stock(title, content, symbol, company_name):
+                logger.debug(f"Skipping irrelevant article for {symbol}: {title[:50]}...")
+                continue
+
+            # Clean the content
+            cleaned_content = self._clean_content(content)
+
             event = {
                 "symbol": symbol,
-                "title": result.get("title", ""),
-                "url": result.get("url", ""),
-                "content": result.get("content", ""),
-                "score": result.get("score", 0.0),
+                "title": title,
+                "url": url,
+                "content": cleaned_content,
+                "score": score,
                 "published_date": result.get("published_date", "")
             }
 
-            # Only include events with meaningful content
-            if event["title"] and event["content"]:
-                events.append(event)
+            events.append(event)
 
-        return events
+        # Sort by relevance score and return top 3
+        events.sort(key=lambda x: x['score'], reverse=True)
+        return events[:3]
+
+    def _is_quality_content(self, title: str, content: str, url: str) -> bool:
+        """
+        Check if content meets quality standards.
+
+        Args:
+            title: Article title
+            content: Article content
+            url: Article URL
+
+        Returns:
+            True if content is high quality, False otherwise
+        """
+        # Must have title and substantial content
+        if not title or len(content) < 50:
+            return False
+
+        # Filter out common junk patterns
+        junk_patterns = [
+            r'password.*must be',
+            r'create.*account',
+            r'sign up',
+            r'email this page',
+            r'print this page',
+            r'\(Ad\)',
+            r'Image \d+:',
+            r'tc pixel',
+            r'Accept cookies',
+            r'Subscribe now',
+            r'Free trial',
+        ]
+
+        content_lower = content.lower()
+        for pattern in junk_patterns:
+            if re.search(pattern, content_lower, re.IGNORECASE):
+                return False
+
+        # Check for navigation elements
+        # Only fail if these appear in the first 100 characters (likely navigation)
+        nav_keywords = ['calendar', 'dividend calculator', 'earnings calendar', 'market holidays']
+        if any(keyword in content_lower for keyword in nav_keywords) and any(keyword in content_lower[:100] for keyword in nav_keywords):
+            return False
+
+        return True
+
+    def _is_relevant_to_stock(self, title: str, content: str, symbol: str, company_name: str) -> bool:
+        """
+        Verify that the article is actually about the specified stock.
+
+        Args:
+            title: Article title
+            content: Article content
+            symbol: Stock symbol
+            company_name: Company name
+
+        Returns:
+            True if article is relevant, False otherwise
+        """
+        title_lower = title.lower()
+        content_lower = content.lower()
+        symbol_lower = symbol.lower()
+        company_lower = company_name.lower()
+
+        # Must mention symbol OR company name in title or first 300 characters of content
+        content_preview = content_lower[:300]
+        return (symbol_lower in title_lower or company_lower in title_lower or
+                symbol_lower in content_preview or company_lower in content_preview)
+
+    def _clean_content(self, content: str) -> str:
+        """
+        Clean HTML artifacts and unnecessary text from content.
+
+        Args:
+            content: Raw content text
+
+        Returns:
+            Cleaned content
+        """
+        # Remove common HTML artifacts
+        cleaned = re.sub(r'Image \d+:', '', content)
+        cleaned = re.sub(r'\(Ad\)', '', cleaned)
+        cleaned = re.sub(r'tc pixel', '', cleaned)
+
+        # Remove excessive whitespace
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+
+        # Trim and return
+        return cleaned.strip()
 
     def should_trigger_report(
         self,
         events_by_symbol: Dict[str, List[Dict]],
-        threshold: float = 0.7
+        threshold: float = 0.75
     ) -> bool:
         """
         Determine if detected events warrant triggering an automated report.
 
         Args:
             events_by_symbol: Dictionary of events detected per symbol
-            threshold: Minimum relevance score to trigger report (0.0 to 1.0)
+            threshold: Minimum relevance score to trigger report (0.0 to 1.0, default: 0.75)
 
         Returns:
             True if report should be triggered, False otherwise
@@ -180,8 +330,14 @@ class MarketEventDetector:
         for symbol, events in events_by_symbol.items():
             for event in events:
                 if event.get("score", 0.0) >= threshold:
-                    logger.info(f"High-relevance event detected for {symbol}: {event['title']}")
+                    logger.info(f"High-relevance event detected for {symbol} (score: {event['score']:.2f}): {event['title']}")
                     return True
+
+        # Also trigger if we have at least 2 events for any symbol (indicates significant activity)
+        for symbol, events in events_by_symbol.items():
+            if len(events) >= 2:
+                logger.info(f"Multiple events detected for {symbol}, triggering report")
+                return True
 
         return False
 
@@ -264,7 +420,7 @@ def check_portfolio_events(portfolio_positions: List[Dict]) -> Optional[Dict]:
     events_by_symbol = detector.check_events_for_symbols(symbols, days=1)
     general_events = detector.check_general_market_events(days=1)
 
-    should_trigger = detector.should_trigger_report(events_by_symbol, threshold=0.7)
+    should_trigger = detector.should_trigger_report(events_by_symbol, threshold=0.75)
 
     return {
         "symbol_events": events_by_symbol,
