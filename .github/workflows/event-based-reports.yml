@@ -153,6 +153,9 @@ jobs:
 
           # Portfolio Data
           PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+
+          # Market Events Data (passed via environment variable to avoid shell escaping issues)
+          MARKET_EVENTS_JSON: ${{ needs.check-events.outputs.events_json }}
         run: |
           echo "🚨 Generating event-triggered stock portfolio report..."
           echo ""
@@ -161,8 +164,8 @@ jobs:
           echo ""
 
           # Generate AI report with market event context
-          # Pass events JSON to include in email report
-          stock-tracker ai-report --email --events '${{ needs.check-events.outputs.events_json }}'
+          # Events are passed via MARKET_EVENTS_JSON environment variable
+          stock-tracker ai-report --email
 
           echo "✅ Event-triggered report generated and sent successfully!"
 

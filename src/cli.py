@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime
 
 import click
@@ -91,15 +92,28 @@ def ai_report(email, events):
     data_fetcher = DataFetcher(api_key=alpha_vantage_key)
     reporting = Reporting(config)
 
-    # Parse events if provided
+    # Parse events from command-line argument or environment variable
     market_events = None
+
+    # First try command-line argument
     if events:
         try:
             market_events = json.loads(events)
-            logger.info("Loaded market events for event-based report")
+            logger.info("Loaded market events from --events argument")
         except json.JSONDecodeError as e:
-            logger.error(f"Error parsing events JSON: {e}")
-            click.echo("⚠️  Warning: Could not parse market events data")
+            logger.error(f"Error parsing events JSON from argument: {e}")
+            click.echo("⚠️  Warning: Could not parse market events from --events argument")
+
+    # If not provided via argument, try environment variable
+    if not market_events:
+        events_env = os.getenv("MARKET_EVENTS_JSON")
+        if events_env:
+            try:
+                market_events = json.loads(events_env)
+                logger.info("Loaded market events from MARKET_EVENTS_JSON environment variable")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing MARKET_EVENTS_JSON environment variable: {e}")
+                click.echo("⚠️  Warning: Could not parse market events from environment variable")
 
     # Generate the text report for console display
     text_report = reporting.generate_text_report(portfolio, data_fetcher)
