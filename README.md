@@ -1,5 +1,12 @@
 # Stock Tracker CLI
 
+[![PyPI version](https://badge.fury.io/py/stock-tracker-cli.svg)](https://badge.fury.io/py/stock-tracker-cli)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/stock-tracker-cli.svg)](https://pypi.org/project/stock-tracker-cli/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/stock-tracker-cli.svg)](https://pypi.org/project/stock-tracker-cli/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub Stars](https://img.shields.io/github/stars/Chukwuebuka-2003/stock_cli.svg)](https://github.com/Chukwuebuka-2003/stock_cli/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/Chukwuebuka-2003/stock_cli.svg)](https://github.com/Chukwuebuka-2003/stock_cli/issues)
+
 A command-line tool to track your stock portfolio and get AI-powered investment analysis.
 
 ## Features
