@@ -47,10 +47,11 @@ class PortfolioHistory:
         """
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Check if we already have a snapshot for today
-        if self.history and self.history[-1].get("date") == today:
-            logger.info(f"Snapshot for {today} already exists. Updating it.")
-            self.history.pop()  # Remove old snapshot for today
+        # Remove any existing snapshot(s) for today
+        existing_today = [snap for snap in self.history if snap.get("date") == today]
+        if existing_today:
+            logger.info(f"Snapshot(s) for {today} already exist. Removing them before adding new snapshot.")
+            self.history = [snap for snap in self.history if snap.get("date") != today]
 
         positions = portfolio.get_positions()
         total_value = 0
@@ -62,8 +63,7 @@ class PortfolioHistory:
             quantity = position["quantity"]
             purchase_price = position["purchase_price"]
 
-            stock_data = data_fetcher.get_stock_data(symbol)
-            if stock_data:
+            if stock_data := data_fetcher.get_stock_data(symbol):
                 current_price = stock_data["currentPrice"]
                 value = current_price * quantity
                 cost = purchase_price * quantity
@@ -109,25 +109,27 @@ class PortfolioHistory:
         if not self.history:
             return None
 
-        # Sort history by date to ensure chronological order
-        sorted_history = sorted(self.history, key=lambda x: x["date"])
+        # Sort history by date to ensure chronological order (parse dates for accuracy)
+        def parse_date(entry):
+            return datetime.strptime(entry["date"], "%Y-%m-%d")
+
+        sorted_history = sorted(self.history, key=parse_date)
+        end_snapshot = sorted_history[-1]
 
         if days is None:
             # All-time performance
             start_snapshot = sorted_history[0]
-            end_snapshot = sorted_history[-1]
         else:
             # Performance for last N days
-            cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            cutoff_datetime = datetime.now() - timedelta(days=days)
 
-            # Filter snapshots >= cutoff_date
-            filtered_history = [s for s in sorted_history if s["date"] >= cutoff_date]
+            # Filter snapshots >= cutoff_datetime
+            filtered_history = [s for s in sorted_history if parse_date(s) >= cutoff_datetime]
 
             if not filtered_history:
                 return None
 
             start_snapshot = filtered_history[0]
-            end_snapshot = sorted_history[-1]
 
         start_value = start_snapshot["total_value"]
         end_value = end_snapshot["total_value"]
@@ -141,7 +143,7 @@ class PortfolioHistory:
             "end_value": end_value,
             "value_change": value_change,
             "percent_change": percent_change,
-            "days": days if days else len(sorted_history)
+            "days": days or len(sorted_history)
         }
 
     def get_latest_snapshot(self):

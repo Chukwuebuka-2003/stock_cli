@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from datetime import datetime
 
 from stock_cli.file_paths import ALERTS_PATH
@@ -52,6 +53,11 @@ class PriceAlerts:
 
         if above is None and below is None:
             raise ValueError("At least one of 'above' or 'below' must be specified")
+
+        if above is not None and above <= 0:
+            raise ValueError("'above' must be a positive number")
+        if below is not None and below <= 0:
+            raise ValueError("'below' must be a positive number")
 
         alert = {
             "id": self._generate_alert_id(),
@@ -149,17 +155,18 @@ class PriceAlerts:
             alert["last_checked"] = datetime.now().isoformat()
 
             triggered = False
-            trigger_reason = None
+            trigger_reasons = []
 
             if alert["above"] is not None and current_price > alert["above"]:
                 triggered = True
-                trigger_reason = f"Price ${current_price:.2f} is above ${alert['above']:.2f}"
+                trigger_reasons.append(f"Price ${current_price:.2f} is above ${alert['above']:.2f}")
 
             if alert["below"] is not None and current_price < alert["below"]:
                 triggered = True
-                trigger_reason = f"Price ${current_price:.2f} is below ${alert['below']:.2f}"
+                trigger_reasons.append(f"Price ${current_price:.2f} is below ${alert['below']:.2f}")
 
             if triggered:
+                trigger_reason = "; ".join(trigger_reasons)
                 alert["triggered"] = True
                 alert["triggered_at"] = datetime.now().isoformat()
                 alert["triggered_price"] = current_price
@@ -174,20 +181,8 @@ class PriceAlerts:
         return triggered_alerts
 
     def _generate_alert_id(self):
-        """Generate a unique alert ID."""
-        if not self.alerts:
-            return "alert_1"
-
-        # Find the highest existing ID number
-        max_id = 0
-        for alert in self.alerts:
-            try:
-                alert_num = int(alert["id"].split("_")[1])
-                max_id = max(max_id, alert_num)
-            except (IndexError, ValueError):
-                pass
-
-        return f"alert_{max_id + 1}"
+        """Generate a robust, unique alert ID using UUID4."""
+        return f"alert_{uuid.uuid4().hex[:8]}"
 
     def format_alert(self, alert):
         """

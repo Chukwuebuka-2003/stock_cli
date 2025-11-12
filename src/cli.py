@@ -314,8 +314,7 @@ def history_show(period):
     if period == "all":
         click.echo("\nPerformance by Period:")
         for p in ["7d", "30d", "90d", "1y"]:
-            perf = portfolio_history.get_performance(period_days_map[p])
-            if perf:
+            if perf := portfolio_history.get_performance(period_days_map[p]):
                 click.echo(
                     f"  {period_name_map[p]:10} {perf['value_change']:+,.2f} ({perf['percent_change']:+.2f}%)"
                 )
@@ -407,9 +406,8 @@ def alert_check():
     click.echo(f"Checking {len(active_alerts)} active alert(s)...")
 
     data_fetcher = DataFetcher(api_key=api_key)
-    triggered = alerts.check_alerts(data_fetcher)
 
-    if triggered:
+    if triggered := alerts.check_alerts(data_fetcher):
         click.echo(f"\n🚨 {len(triggered)} alert(s) triggered!")
         click.echo("=" * 60)
         for alert_item in triggered:
@@ -432,12 +430,18 @@ def watchlist_add(symbol, note):
     """Add a stock to your watchlist"""
     wl = Watchlist()
 
+    # Validate symbol format before attempting to add
+    symbol_normalized = symbol.strip().upper()
+    if not symbol_normalized or not symbol_normalized.replace('.', '').replace('-', '').isalnum():
+        click.echo(f"❌ Invalid stock symbol: '{symbol}'")
+        return
+
     if wl.add_stock(symbol, note=note):
-        click.echo(f"✅ Added {symbol.upper()} to watchlist")
+        click.echo(f"✅ Added {symbol_normalized} to watchlist")
         if note:
             click.echo(f"Note: {note}")
     else:
-        click.echo(f"⚠️  {symbol.upper()} is already in your watchlist")
+        click.echo(f"⚠️  {symbol_normalized} is already in your watchlist")
 
 
 @watchlist.command(name="remove")
@@ -500,8 +504,7 @@ def watchlist_report():
         symbol = stock["symbol"]
         click.echo(f"\n{symbol}")
 
-        stock_data = data_fetcher.get_stock_data(symbol)
-        if stock_data:
+        if stock_data := data_fetcher.get_stock_data(symbol):
             click.echo(f"  Current Price: ${stock_data['currentPrice']:,.2f}")
             click.echo(f"  Change: {stock_data['change']:+.2f} ({stock_data['changePercent']})")
             click.echo(f"  Previous Close: ${stock_data['previousClose']:,.2f}")

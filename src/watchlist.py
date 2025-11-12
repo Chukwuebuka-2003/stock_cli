@@ -47,10 +47,15 @@ class Watchlist:
         Returns:
             bool: True if added, False if already exists
         """
-        symbol = symbol.upper()
+        symbol = symbol.strip().upper()
 
-        # Check if stock already exists
-        if any(stock["symbol"] == symbol for stock in self.stocks):
+        # Validate symbol format: must be non-empty and alphanumeric
+        if not symbol or not symbol.replace('.', '').replace('-', '').isalnum():
+            logger.warning(f"Invalid stock symbol: '{symbol}'")
+            return False
+
+        # Check if stock already exists (normalize for comparison)
+        if any(stock["symbol"].strip().upper() == symbol for stock in self.stocks):
             logger.warning(f"{symbol} is already in the watchlist")
             return False
 
@@ -74,7 +79,7 @@ class Watchlist:
         Returns:
             bool: True if removed, False if not found
         """
-        symbol = symbol.upper()
+        symbol = symbol.strip().upper()
         original_count = len(self.stocks)
         self.stocks = [s for s in self.stocks if s["symbol"] != symbol]
 
@@ -98,7 +103,7 @@ class Watchlist:
         Returns:
             bool: True if in watchlist, False otherwise
         """
-        symbol = symbol.upper()
+        symbol = symbol.strip().upper()
         return any(stock["symbol"] == symbol for stock in self.stocks)
 
     def update_note(self, symbol, note):
@@ -110,7 +115,7 @@ class Watchlist:
         Returns:
             bool: True if updated, False if not found
         """
-        symbol = symbol.upper()
+        symbol = symbol.strip().upper()
 
         for stock in self.stocks:
             if stock["symbol"] == symbol:
