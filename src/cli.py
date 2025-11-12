@@ -6,10 +6,13 @@ from datetime import datetime
 import click
 
 from .ai import AIAnalyzer
+from .alerts import PriceAlerts
 from .config import Config
 from .data_fetcher import DataFetcher
+from .history import PortfolioHistory
 from .portfolio import Portfolio
 from .reporting import Reporting
+from .watchlist import Watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -225,3 +228,287 @@ def setup_email(smtp_server, smtp_port, email, password, recipient):
         click.echo("✅ Email settings configured successfully!")
     else:
         click.echo("❌ Test email failed. Please check your settings.")
+
+
+# Portfolio History Commands
+@cli.group()
+def history():
+    """Manage portfolio history and view performance over time"""
+    pass
+
+
+@history.command(name="snapshot")
+def history_snapshot():
+    """Take a snapshot of your current portfolio for historical tracking"""
+    config = Config()
+    api_key = config.get("alpha_vantage_api_key")
+    if not api_key:
+        click.echo(
+            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+        )
+        return
+
+    portfolio = Portfolio()
+    if not portfolio.get_positions():
+        click.echo("Your portfolio is empty. Add some positions first.")
+        return
+
+    data_fetcher = DataFetcher(api_key=api_key)
+    portfolio_history = PortfolioHistory()
+
+    click.echo("Taking portfolio snapshot...")
+    snapshot = portfolio_history.add_snapshot(portfolio, data_fetcher)
+
+    click.echo(f"\n✅ Snapshot saved for {snapshot['date']}")
+    click.echo(f"Total Value: ${snapshot['total_value']:,.2f}")
+    click.echo(f"Total Cost: ${snapshot['total_cost']:,.2f}")
+    click.echo(f"Gain/Loss: ${snapshot['gain_loss']:,.2f} ({snapshot['gain_loss_percent']:+.2f}%)")
+
+
+@history.command(name="show")
+@click.option(
+    "--period",
+    type=click.Choice(["7d", "30d", "90d", "1y", "all"]),
+    default="all",
+    help="Time period to show performance for",
+)
+def history_show(period):
+    """Show portfolio performance over time"""
+    portfolio_history = PortfolioHistory()
+
+    if not portfolio_history.history:
+        click.echo("No historical data available.")
+        click.echo("Run 'stock-tracker history snapshot' to start tracking your portfolio.")
+        return
+
+    # Map period to days
+    period_days_map = {
+        "7d": 7,
+        "30d": 30,
+        "90d": 90,
+        "1y": 365,
+        "all": None,
+    }
+
+    period_name_map = {
+        "7d": "7 Days",
+        "30d": "30 Days",
+        "90d": "90 Days",
+        "1y": "1 Year",
+        "all": "All Time",
+    }
+
+    days = period_days_map[period]
+    period_name = period_name_map[period]
+
+    performance = portfolio_history.get_performance(days)
+
+    if not performance:
+        click.echo(f"No data available for {period_name}.")
+        return
+
+    report = portfolio_history.format_performance_report(period_name, performance)
+    click.echo(report)
+
+    # Show all available periods if showing all
+    if period == "all":
+        click.echo("\nPerformance by Period:")
+        for p in ["7d", "30d", "90d", "1y"]:
+            perf = portfolio_history.get_performance(period_days_map[p])
+            if perf:
+                click.echo(
+                    f"  {period_name_map[p]:10} {perf['value_change']:+,.2f} ({perf['percent_change']:+.2f}%)"
+                )
+
+
+# Alert Commands
+@cli.group()
+def alert():
+    """Manage price alerts for stocks"""
+    pass
+
+
+@alert.command(name="add")
+@click.argument("symbol")
+@click.option("--above", type=float, help="Alert when price goes above this value")
+@click.option("--below", type=float, help="Alert when price goes below this value")
+def alert_add(symbol, above, below):
+    """Add a price alert for a stock"""
+    if above is None and below is None:
+        click.echo("❌ Error: You must specify at least one of --above or --below")
+        return
+
+    alerts = PriceAlerts()
+
+    try:
+        alert = alerts.add_alert(symbol, above=above, below=below)
+        click.echo(f"✅ Alert added for {alert['symbol']}")
+        click.echo(f"ID: {alert['id']}")
+        if above:
+            click.echo(f"Trigger above: ${above:.2f}")
+        if below:
+            click.echo(f"Trigger below: ${below:.2f}")
+    except ValueError as e:
+        click.echo(f"❌ Error: {e}")
+
+
+@alert.command(name="list")
+@click.option("--symbol", help="Filter alerts by symbol")
+@click.option("--active-only", is_flag=True, help="Show only active (non-triggered) alerts")
+def alert_list(symbol, active_only):
+    """List all price alerts"""
+    alerts = PriceAlerts()
+    alert_list = alerts.get_alerts(symbol=symbol, active_only=active_only)
+
+    if not alert_list:
+        if symbol:
+            click.echo(f"No alerts found for {symbol}")
+        else:
+            click.echo("No alerts configured.")
+            click.echo("Add an alert with: stock-tracker alert add SYMBOL --above PRICE")
+        return
+
+    click.echo(f"\n{'Active' if active_only else 'All'} Alerts:")
+    click.echo("=" * 60)
+    for alert_item in alert_list:
+        click.echo(f"\n{alerts.format_alert(alert_item)}")
+
+
+@alert.command(name="remove")
+@click.argument("alert_id")
+def alert_remove(alert_id):
+    """Remove a price alert by ID"""
+    alerts = PriceAlerts()
+
+    if alerts.remove_alert(alert_id):
+        click.echo(f"✅ Alert {alert_id} removed")
+    else:
+        click.echo(f"❌ Alert {alert_id} not found")
+
+
+@alert.command(name="check")
+def alert_check():
+    """Check all active alerts against current prices"""
+    config = Config()
+    api_key = config.get("alpha_vantage_api_key")
+    if not api_key:
+        click.echo(
+            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+        )
+        return
+
+    alerts = PriceAlerts()
+    active_alerts = alerts.get_alerts(active_only=True)
+
+    if not active_alerts:
+        click.echo("No active alerts to check.")
+        return
+
+    click.echo(f"Checking {len(active_alerts)} active alert(s)...")
+
+    data_fetcher = DataFetcher(api_key=api_key)
+    triggered = alerts.check_alerts(data_fetcher)
+
+    if triggered:
+        click.echo(f"\n🚨 {len(triggered)} alert(s) triggered!")
+        click.echo("=" * 60)
+        for alert_item in triggered:
+            click.echo(f"\n{alerts.format_alert(alert_item)}")
+    else:
+        click.echo("\n✅ No alerts triggered")
+
+
+# Watchlist Commands
+@cli.group()
+def watchlist():
+    """Manage your stock watchlist"""
+    pass
+
+
+@watchlist.command(name="add")
+@click.argument("symbol")
+@click.option("--note", help="Optional note about the stock")
+def watchlist_add(symbol, note):
+    """Add a stock to your watchlist"""
+    wl = Watchlist()
+
+    if wl.add_stock(symbol, note=note):
+        click.echo(f"✅ Added {symbol.upper()} to watchlist")
+        if note:
+            click.echo(f"Note: {note}")
+    else:
+        click.echo(f"⚠️  {symbol.upper()} is already in your watchlist")
+
+
+@watchlist.command(name="remove")
+@click.argument("symbol")
+def watchlist_remove(symbol):
+    """Remove a stock from your watchlist"""
+    wl = Watchlist()
+
+    if wl.remove_stock(symbol):
+        click.echo(f"✅ Removed {symbol.upper()} from watchlist")
+    else:
+        click.echo(f"❌ {symbol.upper()} not found in watchlist")
+
+
+@watchlist.command(name="list")
+def watchlist_list():
+    """List all stocks in your watchlist"""
+    wl = Watchlist()
+    stocks = wl.get_stocks()
+
+    if not stocks:
+        click.echo("Your watchlist is empty.")
+        click.echo("Add stocks with: stock-tracker watchlist add SYMBOL")
+        return
+
+    click.echo(f"\nWatchlist ({len(stocks)} stock{'s' if len(stocks) != 1 else ''}):")
+    click.echo("=" * 60)
+
+    for stock in stocks:
+        click.echo(f"\n{stock['symbol']}")
+        click.echo(f"  Added: {stock['added_at'][:10]}")
+        if stock.get("note"):
+            click.echo(f"  Note: {stock['note']}")
+
+
+@watchlist.command(name="report")
+def watchlist_report():
+    """Generate a detailed report for your watchlist"""
+    config = Config()
+    api_key = config.get("alpha_vantage_api_key")
+    if not api_key:
+        click.echo(
+            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+        )
+        return
+
+    wl = Watchlist()
+    stocks = wl.get_stocks()
+
+    if not stocks:
+        click.echo("Your watchlist is empty.")
+        return
+
+    data_fetcher = DataFetcher(api_key=api_key)
+
+    click.echo(f"\nWatchlist Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    click.echo("=" * 80)
+
+    for stock in stocks:
+        symbol = stock["symbol"]
+        click.echo(f"\n{symbol}")
+
+        stock_data = data_fetcher.get_stock_data(symbol)
+        if stock_data:
+            click.echo(f"  Current Price: ${stock_data['currentPrice']:,.2f}")
+            click.echo(f"  Change: {stock_data['change']:+.2f} ({stock_data['changePercent']})")
+            click.echo(f"  Previous Close: ${stock_data['previousClose']:,.2f}")
+        else:
+            click.echo("  ⚠️  Could not fetch price data")
+
+        if stock.get("note"):
+            click.echo(f"  Note: {stock['note']}")
+
+    click.echo("\n" + "=" * 80)
