@@ -19,6 +19,9 @@ A command-line tool to track your stock portfolio and get AI-powered investment 
 - 🐳 **Docker Support**: Containerized deployment with automated scheduled reports
 - 🚨 **GitHub Actions Automation**: Scheduled and event-based reporting with Tavily API integration
 - 📰 **Market Event Detection**: Automatically trigger reports when significant market events affect your portfolio
+- 📈 **Portfolio History**: Track portfolio performance over time with daily snapshots and time-period analysis
+- 🔔 **Price Alerts**: Set price alerts for stocks with customizable above/below thresholds
+- 👀 **Watchlist**: Track stocks you're interested in without adding them to your portfolio
 
 ## Installation
 
@@ -112,6 +115,57 @@ stock-tracker setup-alpha-vantage
 
 # Configure email settings
 stock-tracker setup-email
+```
+
+### Portfolio History
+
+```bash
+# Take a snapshot of your current portfolio
+stock-tracker history snapshot
+
+# View performance over time
+stock-tracker history show --period 7d    # Last 7 days
+stock-tracker history show --period 30d   # Last 30 days
+stock-tracker history show --period 90d   # Last 90 days
+stock-tracker history show --period 1y    # Last year
+stock-tracker history show --period all   # All time (default)
+```
+
+### Price Alerts
+
+```bash
+# Add a price alert
+stock-tracker alert add AAPL --above 200           # Alert when AAPL goes above $200
+stock-tracker alert add TSLA --below 180           # Alert when TSLA goes below $180
+stock-tracker alert add MSFT --above 400 --below 350  # Dual threshold alert
+
+# List all alerts
+stock-tracker alert list
+stock-tracker alert list --active-only    # Show only non-triggered alerts
+stock-tracker alert list --symbol AAPL    # Filter by symbol
+
+# Check alerts against current prices
+stock-tracker alert check
+
+# Remove an alert
+stock-tracker alert remove alert_1
+```
+
+### Watchlist
+
+```bash
+# Add stocks to watchlist
+stock-tracker watchlist add NVDA
+stock-tracker watchlist add GOOGL --note "Considering for tech exposure"
+
+# List all watchlist stocks
+stock-tracker watchlist list
+
+# Generate detailed watchlist report with current prices
+stock-tracker watchlist report
+
+# Remove a stock from watchlist
+stock-tracker watchlist remove NVDA
 ```
 
 ## Example Output
@@ -233,6 +287,9 @@ The CLI stores data in platform-specific directories:
 - `config.json` - API keys and email settings
 - `positions.json` - Your stock positions
 - `cache.json` - Cached stock data (15-minute expiry)
+- `history.json` - Portfolio snapshots and historical performance data
+- `alerts.json` - Price alerts configuration
+- `watchlist.json` - Watchlist stocks
 - `logs/stock_tracker.log` - Application logs
 
 ## Requirements
