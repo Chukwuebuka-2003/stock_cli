@@ -28,6 +28,14 @@ dependencies = [
     "yfinance==0.2.38",
     "schedule==1.2.0",
     "python-dotenv==1.0.0",
+    # Streamlit UI & Visualization
+    "streamlit>=1.30.0",
+    "plotly>=5.18.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    # Technical Analysis (using pandas/numpy)
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
 ]
 
 [project.urls]
@@ -36,6 +44,7 @@ dependencies = [
 
 [project.scripts]
 stock-tracker = "src.cli:cli"
+stock-tracker-ui = "src.streamlit_app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

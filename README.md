@@ -11,6 +11,7 @@ A command-line tool to track your stock portfolio and get AI-powered investment 
 
 ## Features
 
+### Core Features
 - 📊 **Portfolio Management**: Add and remove stock positions with purchase prices
 - 💹 **Real-time Data**: Fetch current stock prices using Alpha Vantage API
 - 🤖 **AI Analysis**: Get intelligent insights using Groq's LLM (llama-3.3-70b-versatile)
@@ -22,6 +23,15 @@ A command-line tool to track your stock portfolio and get AI-powered investment 
 - 📈 **Portfolio History**: Track portfolio performance over time with daily snapshots and time-period analysis
 - 🔔 **Price Alerts**: Set price alerts for stocks with customizable above/below thresholds
 - 👀 **Watchlist**: Track stocks you're interested in without adding them to your portfolio
+
+### 🆕 Interactive Dashboard (Streamlit UI)
+- 📊 **Real-time Portfolio Dashboard**: Visual overview of your entire portfolio with interactive charts
+- 📈 **Advanced Price Charts**: Candlestick charts with technical indicators (RSI, MACD, Bollinger Bands, Moving Averages)
+- 🥧 **Portfolio Composition**: Pie charts showing asset allocation
+- 📉 **Performance Analytics**: Visual gain/loss tracking for each position
+- 🎯 **Technical Signals**: Automated buy/sell signals based on technical indicators
+- 🔄 **Multi-timeframe Analysis**: Analyze stocks across different time periods (1M, 3M, 6M, 1Y, 2Y, 5Y, Max)
+- 📊 **Interactive Indicators**: Toggle between different technical indicators in real-time
 
 ## Installation
 
@@ -168,6 +178,61 @@ stock-tracker watchlist report
 stock-tracker watchlist remove NVDA
 ```
 
+## 🆕 Interactive Dashboard (Streamlit UI)
+
+Launch the interactive web-based dashboard for a visual portfolio experience:
+
+```bash
+# Launch the Streamlit dashboard
+streamlit run src/streamlit_app.py
+
+# Or use the command after installation
+stock-tracker-ui
+```
+
+The dashboard will open in your default web browser at `http://localhost:8501`
+
+### Dashboard Features
+
+#### 📊 Portfolio Overview Tab
+- Real-time portfolio metrics (total value, cost basis, gain/loss)
+- Interactive pie chart showing portfolio composition by stock
+- Bar chart displaying individual stock performance
+- Detailed positions table with color-coded gains/losses
+
+#### 📈 Stock Analysis Tab
+- Select any stock from your portfolio
+- Choose time periods: 1 month, 3 months, 6 months, 1 year, 2 years, 5 years, or maximum
+- Interactive candlestick charts with zoom and pan capabilities
+- Technical indicators overlay:
+  - **Moving Averages**: SMA 20, SMA 50, SMA 200
+  - **Bollinger Bands**: Upper, middle, and lower bands
+  - **RSI (Relative Strength Index)**: Overbought/oversold levels
+  - **MACD**: Signal line and histogram
+- Automated technical signals (bullish/bearish/neutral)
+- Volume bars with price correlation
+
+#### 👀 Watchlist Tab
+- Real-time prices for all watchlist stocks
+- Quick view of price changes and percentages
+- Notes for each watched stock
+
+### Dashboard Screenshots
+
+The dashboard provides:
+- ✨ Modern, responsive design
+- 🎨 Color-coded metrics (green for gains, red for losses)
+- 📱 Works on desktop and tablet
+- ⚡ Auto-refreshing data with cache management
+- 🔄 Manual refresh button for instant updates
+
+### Keyboard Shortcuts & Tips
+
+- Use the sidebar for quick CLI command reference
+- Click "Clear Cache" in the sidebar to force fresh data fetch
+- All charts are interactive - hover for details, zoom, and pan
+- Charts can be downloaded as PNG images using the toolbar
+
 ## Example Output
 
 ```
@@ -303,15 +368,28 @@ The CLI stores data in platform-specific directories:
 
 ## Dependencies
 
+### Core Dependencies
 - click - CLI framework
 - pandas - Data manipulation
 - groq - AI inference
 - alpha-vantage - Stock data API
+- yfinance - Historical stock data
 - tavily-python - Market event detection and news search
 - python-dateutil - Date utilities
 - appdirs - Cross-platform directories
 - schedule - Task scheduling
 - python-dotenv - Environment variable management
+
+### UI & Visualization (New!)
+- streamlit - Interactive web dashboard
+- plotly - Interactive charts and graphs
+- matplotlib - Additional plotting capabilities
+- seaborn - Statistical visualizations
+
+### Technical Analysis (New!)
+- ta - Technical indicators library
+- numpy - Numerical computations
+- scipy - Scientific computing
 
 ## Gmail Setup
 

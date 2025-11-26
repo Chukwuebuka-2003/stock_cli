@@ -2,7 +2,11 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta
+from typing import Optional
 
+import pandas as pd
+import yfinance as yf
 from alpha_vantage.timeseries import TimeSeries
 
 from stock_cli.file_paths import CACHE_PATH
@@ -87,4 +91,117 @@ class DataFetcher:
             if symbol in self.cache:
                 logger.warning(f"Returning stale data for {symbol} due to fetch error.")
                 return self.cache[symbol]["data"]
+            return None
+
+    def get_historical_data(
+        self,
+        symbol: str,
+        period: str = "1y",
+        interval: str = "1d"
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get historical OHLCV data for a stock using yfinance.
+
+        Args:
+            symbol: Stock ticker symbol
+            period: Time period (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max)
+            interval: Data interval (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo)
+
+        Returns:
+            DataFrame with OHLCV data (Open, High, Low, Close, Volume)
+            or None if error occurs
+        """
+        try:
+            logger.info(f"Fetching historical data for {symbol} (period={period}, interval={interval})")
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period=period, interval=interval)
+
+            if df.empty:
+                logger.warning(f"No historical data found for {symbol}")
+                return None
+
+            # Ensure standard column names
+            df.index.name = "Date"
+            df = df.reset_index()
+
+            logger.info(f"Successfully fetched {len(df)} rows of historical data for {symbol}")
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching historical data for {symbol}: {e}")
+            return None
+
+    def get_historical_data_range(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: Optional[str] = None,
+        interval: str = "1d"
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get historical data for a specific date range.
+
+        Args:
+            symbol: Stock ticker symbol
+            start_date: Start date (YYYY-MM-DD format)
+            end_date: End date (YYYY-MM-DD format), defaults to today
+            interval: Data interval (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo)
+
+        Returns:
+            DataFrame with OHLCV data or None if error occurs
+        """
+        try:
+            if end_date is None:
+                end_date = datetime.now().strftime("%Y-%m-%d")
+
+            logger.info(f"Fetching historical data for {symbol} from {start_date} to {end_date}")
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(start=start_date, end=end_date, interval=interval)
+
+            if df.empty:
+                logger.warning(f"No historical data found for {symbol} in specified range")
+                return None
+
+            df.index.name = "Date"
+            df = df.reset_index()
+
+            logger.info(f"Successfully fetched {len(df)} rows of historical data for {symbol}")
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching historical data range for {symbol}: {e}")
+            return None
+
+    def get_stock_info(self, symbol: str) -> Optional[dict]:
+        """
+        Get detailed stock information including company details, financials, etc.
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            Dictionary with stock information or None if error occurs
+        """
+        try:
+            logger.info(f"Fetching detailed info for {symbol}")
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+
+            # Extract key information
+            return {
+                "symbol": symbol,
+                "name": info.get("longName", "N/A"),
+                "sector": info.get("sector", "N/A"),
+                "industry": info.get("industry", "N/A"),
+                "marketCap": info.get("marketCap", 0),
+                "peRatio": info.get("trailingPE", 0),
+                "dividendYield": info.get("dividendYield", 0),
+                "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh", 0),
+                "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow", 0),
+                "averageVolume": info.get("averageVolume", 0),
+                "beta": info.get("beta", 0),
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching stock info for {symbol}: {e}")
             return None
