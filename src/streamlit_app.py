@@ -15,8 +15,11 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
+from src.backtesting import Backtester
 from src.config import ConfigManager
 from src.data_fetcher import DataFetcher
+from src.feature_engineering import FeatureEngineer
+from src.ml_models import MLPredictor, ProphetPredictor, train_ensemble_models
 from src.portfolio import PortfolioManager
 from src.technical_indicators import TechnicalIndicators
 from src.watchlist import WatchlistManager
@@ -622,6 +625,534 @@ def display_watchlist():
         logger.error(f"Watchlist error: {e}", exc_info=True)
 
 
+def display_ml_predictions():
+    """Display ML predictions tab."""
+    st.header("🤖 ML Price Predictions")
+
+    portfolio = PortfolioManager(POSITIONS_PATH)
+    positions = portfolio.get_positions()
+
+    if not positions:
+        st.info("📝 No positions in portfolio. Add stocks using the CLI.")
+        return
+
+    # Model selection
+    col1, col2, col3 = st.columns([2, 2, 1])
+
+    with col1:
+        selected_symbol = st.selectbox(
+            "Select Stock for Prediction",
+            options=list(positions.keys()),
+            index=0,
+            key="ml_symbol"
+        )
+
+    with col2:
+        period = st.selectbox(
+            "Training Data Period",
+            options=["6mo", "1y", "2y", "5y"],
+            index=2,
+            key="ml_period"
+        )
+
+    with col3:
+        horizon = st.number_input(
+            "Predict Days Ahead",
+            min_value=1,
+            max_value=30,
+            value=5
+        )
+
+    st.markdown("---")
+
+    # Train models button
+    if st.button("🚀 Train Models & Generate Predictions", type="primary"):
+        with st.spinner(f"Training models for {selected_symbol}..."):
+            try:
+                # Fetch historical data
+                df = get_historical_data(selected_symbol, period)
+
+                if df is None or len(df) < 100:
+                    st.error("Insufficient data for training. Try a longer period.")
+                    return
+
+                st.info(f"Training on {len(df)} days of historical data...")
+
+                # Train ensemble models
+                results = train_ensemble_models(df, selected_symbol, horizon)
+
+                if not results:
+                    st.error("Failed to train models.")
+                    return
+
+                # Display results in tabs
+                pred_tabs = st.tabs(["📈 Prophet Forecast", "🌲 Random Forest", "⚡ XGBoost", "📊 Model Comparison"])
+
+                # Prophet tab
+                with pred_tabs[0]:
+                    st.subheader("Prophet Time Series Forecast")
+
+                    prophet_model = results['prophet']['model']
+                    forecast_df = prophet_model.predict(periods=30)
+
+                    # Create forecast plot
+                    fig = go.Figure()
+
+                    # Historical data
+                    fig.add_trace(go.Scatter(
+                        x=df['Date'],
+                        y=df['Close'],
+                        name="Historical",
+                        line=dict(color="blue", width=2)
+                    ))
+
+                    # Forecast
+                    fig.add_trace(go.Scatter(
+                        x=forecast_df['Date'],
+                        y=forecast_df['Predicted_Price'],
+                        name="Forecast",
+                        line=dict(color="green", width=2, dash="dash")
+                    ))
+
+                    # Confidence intervals
+                    fig.add_trace(go.Scatter(
+                        x=forecast_df['Date'],
+                        y=forecast_df['Upper_Bound'],
+                        name="Upper Bound",
+                        line=dict(width=0),
+                        showlegend=False
+                    ))
+
+                    fig.add_trace(go.Scatter(
+                        x=forecast_df['Date'],
+                        y=forecast_df['Lower_Bound'],
+                        name="Lower Bound",
+                        line=dict(width=0),
+                        fillcolor="rgba(0,255,0,0.2)",
+                        fill="tonexty",
+                        showlegend=False
+                    ))
+
+                    fig.update_layout(
+                        title=f"{selected_symbol} - 30 Day Forecast",
+                        xaxis_title="Date",
+                        yaxis_title="Price ($)",
+                        height=500,
+                        hovermode="x unified"
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Show prediction table
+                    st.subheader("Forecast Values")
+                    st.dataframe(
+                        forecast_df.head(10).style.format({
+                            "Predicted_Price": "${:.2f}",
+                            "Lower_Bound": "${:.2f}",
+                            "Upper_Bound": "${:.2f}"
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                # Random Forest tab
+                with pred_tabs[1]:
+                    st.subheader("Random Forest Classification")
+
+                    rf_model = results['rf_classifier']['model']
+                    rf_metrics = results['rf_classifier']['metrics']
+
+                    # Display metrics
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric("Accuracy", f"{rf_metrics['accuracy']:.2%}")
+                    with col2:
+                        st.metric("Precision", f"{rf_metrics['precision']:.2%}")
+                    with col3:
+                        st.metric("Recall", f"{rf_metrics['recall']:.2%}")
+                    with col4:
+                        st.metric("F1 Score", f"{rf_metrics['f1_score']:.2%}")
+
+                    # Feature importance
+                    st.subheader("Top 20 Important Features")
+                    importance_df = rf_model.get_feature_importance(top_n=20)
+
+                    fig = go.Figure(go.Bar(
+                        x=importance_df['Importance'],
+                        y=importance_df['Feature'],
+                        orientation='h',
+                        marker_color='lightblue'
+                    ))
+
+                    fig.update_layout(
+                        title="Feature Importance",
+                        xaxis_title="Importance",
+                        yaxis_title="Feature",
+                        height=600,
+                        yaxis=dict(autorange="reversed")
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Confusion matrix
+                    if 'confusion_matrix' in rf_metrics:
+                        st.subheader("Confusion Matrix")
+                        cm = np.array(rf_metrics['confusion_matrix'])
+
+                        fig = go.Figure(data=go.Heatmap(
+                            z=cm,
+                            x=['Predicted Down', 'Predicted Up'],
+                            y=['Actual Down', 'Actual Up'],
+                            colorscale='Blues',
+                            text=cm,
+                            texttemplate='%{text}',
+                            textfont={"size": 16}
+                        ))
+
+                        fig.update_layout(
+                            title="Confusion Matrix",
+                            height=400
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True)
+
+                # XGBoost tab
+                with pred_tabs[2]:
+                    st.subheader("XGBoost Classification")
+
+                    xgb_model = results['xgb_classifier']['model']
+                    xgb_metrics = results['xgb_classifier']['metrics']
+
+                    # Display metrics
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric("Accuracy", f"{xgb_metrics['accuracy']:.2%}")
+                    with col2:
+                        st.metric("Precision", f"{xgb_metrics['precision']:.2%}")
+                    with col3:
+                        st.metric("Recall", f"{xgb_metrics['recall']:.2%}")
+                    with col4:
+                        st.metric("F1 Score", f"{xgb_metrics['f1_score']:.2%}")
+
+                    # Feature importance
+                    st.subheader("Top 20 Important Features")
+                    importance_df = xgb_model.get_feature_importance(top_n=20)
+
+                    fig = go.Figure(go.Bar(
+                        x=importance_df['Importance'],
+                        y=importance_df['Feature'],
+                        orientation='h',
+                        marker_color='lightgreen'
+                    ))
+
+                    fig.update_layout(
+                        title="Feature Importance",
+                        xaxis_title="Importance",
+                        yaxis_title="Feature",
+                        height=600,
+                        yaxis=dict(autorange="reversed")
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # Model comparison tab
+                with pred_tabs[3]:
+                    st.subheader("Model Performance Comparison")
+
+                    # Create comparison dataframe
+                    comparison_data = {
+                        'Model': ['Random Forest', 'XGBoost'],
+                        'Accuracy': [rf_metrics['accuracy'], xgb_metrics['accuracy']],
+                        'Precision': [rf_metrics['precision'], xgb_metrics['precision']],
+                        'Recall': [rf_metrics['recall'], xgb_metrics['recall']],
+                        'F1 Score': [rf_metrics['f1_score'], xgb_metrics['f1_score']]
+                    }
+
+                    comparison_df = pd.DataFrame(comparison_data)
+
+                    # Display as table
+                    st.dataframe(
+                        comparison_df.style.format({
+                            'Accuracy': '{:.2%}',
+                            'Precision': '{:.2%}',
+                            'Recall': '{:.2%}',
+                            'F1 Score': '{:.2%}'
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    # Radar chart comparison
+                    fig = go.Figure()
+
+                    metrics_list = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
+                    rf_values = [rf_metrics['accuracy'], rf_metrics['precision'],
+                               rf_metrics['recall'], rf_metrics['f1_score']]
+                    xgb_values = [xgb_metrics['accuracy'], xgb_metrics['precision'],
+                                xgb_metrics['recall'], xgb_metrics['f1_score']]
+
+                    fig.add_trace(go.Scatterpolar(
+                        r=rf_values,
+                        theta=metrics_list,
+                        fill='toself',
+                        name='Random Forest'
+                    ))
+
+                    fig.add_trace(go.Scatterpolar(
+                        r=xgb_values,
+                        theta=metrics_list,
+                        fill='toself',
+                        name='XGBoost'
+                    ))
+
+                    fig.update_layout(
+                        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                        title="Model Performance Radar Chart",
+                        height=500
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Recommendations
+                    st.subheader("💡 Model Recommendations")
+
+                    best_model = "Random Forest" if rf_metrics['accuracy'] > xgb_metrics['accuracy'] else "XGBoost"
+                    st.success(f"**Best Performing Model:** {best_model}")
+
+                    st.info("""
+                    **Interpretation Guide:**
+                    - **Accuracy**: Overall correctness of predictions
+                    - **Precision**: Of all positive predictions, how many were correct
+                    - **Recall**: Of all actual positives, how many were predicted
+                    - **F1 Score**: Harmonic mean of precision and recall
+                    """)
+
+            except Exception as e:
+                st.error(f"Error during model training: {e}")
+                logger.error(f"ML prediction error: {e}", exc_info=True)
+
+    else:
+        st.info("👆 Click the button above to train models and generate predictions")
+
+
+def display_backtesting():
+    """Display backtesting results tab."""
+    st.header("📊 Strategy Backtesting")
+
+    portfolio = PortfolioManager(POSITIONS_PATH)
+    positions = portfolio.get_positions()
+
+    if not positions:
+        st.info("📝 No positions in portfolio. Add stocks using the CLI.")
+        return
+
+    # Configuration
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        selected_symbol = st.selectbox(
+            "Select Stock",
+            options=list(positions.keys()),
+            index=0,
+            key="backtest_symbol"
+        )
+
+    with col2:
+        period = st.selectbox(
+            "Backtest Period",
+            options=["1y", "2y", "3y", "5y"],
+            index=1,
+            key="backtest_period"
+        )
+
+    with col3:
+        initial_capital = st.number_input(
+            "Initial Capital ($)",
+            min_value=1000,
+            max_value=1000000,
+            value=100000,
+            step=1000
+        )
+
+    st.markdown("---")
+
+    # Run backtest button
+    if st.button("🔄 Run Backtest", type="primary"):
+        with st.spinner(f"Running backtest for {selected_symbol}..."):
+            try:
+                # Fetch historical data
+                df = get_historical_data(selected_symbol, period)
+
+                if df is None or len(df) < 100:
+                    st.error("Insufficient data for backtesting.")
+                    return
+
+                # Train a simple ML model for signals
+                st.info("Training model for trading signals...")
+                model = MLPredictor("random_forest", "classification")
+                model.train(df, selected_symbol, horizon=5, test_size=0.3)
+
+                # Generate predictions
+                predictions = model.predict(df)
+
+                # Create signals (1 for buy, -1 for sell, 0 for hold)
+                signals = pd.Series(0, index=range(len(df)))
+                if len(predictions) > 0:
+                    # Use predictions to generate signals
+                    for i in range(len(predictions) - 1):
+                        if i + 1 < len(predictions):
+                            if predictions[i] == 1 and predictions[i - 1] == 0:  # Buy signal
+                                signals.iloc[i] = 1
+                            elif predictions[i] == 0 and predictions[i - 1] == 1:  # Sell signal
+                                signals.iloc[i] = -1
+
+                # Run backtest
+                backtester = Backtester(initial_capital=initial_capital)
+                results = backtester.run_strategy(df, signals, commission=0.001)
+
+                if not results:
+                    st.error("Backtest failed.")
+                    return
+
+                metrics = results['metrics']
+                equity_curve = pd.DataFrame(results['equity_curve'])
+
+                # Display key metrics
+                st.subheader("📈 Performance Metrics")
+
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric(
+                        "Total Return",
+                        f"${metrics['total_return']:,.2f}",
+                        f"{metrics['total_return_pct']:.2f}%"
+                    )
+
+                with col2:
+                    st.metric(
+                        "Sharpe Ratio",
+                        f"{metrics.get('sharpe_ratio', 0):.2f}"
+                    )
+
+                with col3:
+                    st.metric(
+                        "Max Drawdown",
+                        f"{metrics.get('max_drawdown_pct', 0):.2f}%"
+                    )
+
+                with col4:
+                    st.metric(
+                        "Win Rate",
+                        f"{metrics.get('win_rate_pct', 0):.1f}%"
+                    )
+
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric("Number of Trades", metrics['num_trades'])
+
+                with col2:
+                    st.metric("Sortino Ratio", f"{metrics.get('sortino_ratio', 0):.2f}")
+
+                with col3:
+                    st.metric("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}")
+
+                with col4:
+                    final_equity = metrics['final_equity']
+                    st.metric("Final Equity", f"${final_equity:,.2f}")
+
+                st.markdown("---")
+
+                # Equity curve
+                st.subheader("💰 Equity Curve")
+
+                fig = go.Figure()
+
+                fig.add_trace(go.Scatter(
+                    x=equity_curve['date'],
+                    y=equity_curve['equity'],
+                    name="Portfolio Value",
+                    line=dict(color="blue", width=2),
+                    fill='tonexty'
+                ))
+
+                # Add buy-and-hold comparison
+                bh_comparison = backtester.compare_with_buy_and_hold(df, results)
+                initial_price = df.iloc[0]['Close']
+                shares = initial_capital / initial_price
+                bh_equity = [shares * df.iloc[i]['Close'] for i in range(len(df))]
+
+                fig.add_trace(go.Scatter(
+                    x=df['Date'],
+                    y=bh_equity,
+                    name="Buy & Hold",
+                    line=dict(color="green", width=2, dash="dash")
+                ))
+
+                fig.update_layout(
+                    title=f"{selected_symbol} Backtest - Equity Curve",
+                    xaxis_title="Date",
+                    yaxis_title="Portfolio Value ($)",
+                    height=500,
+                    hovermode="x unified"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Comparison with buy-and-hold
+                st.subheader("📊 Strategy vs Buy-and-Hold")
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.metric(
+                        "Strategy Return",
+                        f"{bh_comparison['strategy']['return_pct']:.2f}%"
+                    )
+
+                with col2:
+                    st.metric(
+                        "Buy-and-Hold Return",
+                        f"{bh_comparison['buy_and_hold']['return_pct']:.2f}%"
+                    )
+
+                with col3:
+                    outperformance = bh_comparison['outperformance_pct']
+                    st.metric(
+                        "Outperformance",
+                        f"{outperformance:+.2f}%",
+                        delta=f"{outperformance:+.2f}%"
+                    )
+
+                # Trade history
+                if results['trades']:
+                    st.subheader("📜 Trade History")
+
+                    trades_df = pd.DataFrame(results['trades'][:50])  # Show last 50 trades
+
+                    if not trades_df.empty:
+                        st.dataframe(
+                            trades_df.style.format({
+                                'price': '${:.2f}',
+                                'cost': '${:.2f}',
+                                'proceeds': '${:.2f}',
+                                'equity': '${:,.2f}'
+                            }),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+
+            except Exception as e:
+                st.error(f"Error during backtesting: {e}")
+                logger.error(f"Backtesting error: {e}", exc_info=True)
+
+    else:
+        st.info("👆 Click the button above to run backtest")
+
+
 def main():
     """Main Streamlit application."""
     # Sidebar
@@ -658,7 +1189,13 @@ def main():
     st.title("📊 Stock Portfolio Dashboard")
 
     # Tabs
-    tab1, tab2, tab3 = st.tabs(["Portfolio Overview", "Stock Analysis", "Watchlist"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Portfolio Overview",
+        "Stock Analysis",
+        "🤖 ML Predictions",
+        "📊 Backtesting",
+        "Watchlist"
+    ])
 
     with tab1:
         display_portfolio_overview()
@@ -667,6 +1204,12 @@ def main():
         display_stock_analysis()
 
     with tab3:
+        display_ml_predictions()
+
+    with tab4:
+        display_backtesting()
+
+    with tab5:
         display_watchlist()
 
 
