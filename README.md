@@ -33,6 +33,14 @@ A command-line tool to track your stock portfolio and get AI-powered investment 
 - 🔄 **Multi-timeframe Analysis**: Analyze stocks across different time periods (1M, 3M, 6M, 1Y, 2Y, 5Y, Max)
 - 📊 **Interactive Indicators**: Toggle between different technical indicators in real-time
 
+<img width="1366" height="768" alt="Screenshot From 2025-11-29 16-48-13" src="https://github.com/user-attachments/assets/897a48b8-8fa7-4c54-8269-c5e72cf6c123" />
+
+<img width="1366" height="768" alt="Screenshot From 2025-11-29 16-48-24" src="https://github.com/user-attachments/assets/134f5edb-6605-4d7f-b400-56f5a055cddf" />
+
+
+<img width="1366" height="768" alt="Screenshot From 2025-11-29 20-32-11" src="https://github.com/user-attachments/assets/f15a1b42-d270-4ec1-a917-1f063d807d1a" />
+
+
 ## Installation
 
 ### From PyPI
