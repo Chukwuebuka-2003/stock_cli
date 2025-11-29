@@ -1,8 +1,12 @@
 import json
 import logging
 import os
+from dotenv import load_dotenv
 
 from stock_cli.file_paths import CONFIG_PATH
+
+# Load .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +42,9 @@ class Config:
             config = self.create_default_config()
 
         # Override with environment variables if present
-        if os.getenv("GROQ_API_KEY"):
-            config["groq_api_key"] = os.getenv("GROQ_API_KEY")
-            logger.info("Using GROQ_API_KEY from environment variable")
-
-        if os.getenv("ALPHA_VANTAGE_API_KEY"):
-            config["alpha_vantage_api_key"] = os.getenv("ALPHA_VANTAGE_API_KEY")
-            logger.info("Using ALPHA_VANTAGE_API_KEY from environment variable")
+        if os.getenv("TWELVE_DATA_API_KEY"):
+            config["twelvedata_api_key"] = os.getenv("TWELVE_DATA_API_KEY")
+            logger.info("Using TWELVE_DATA_API_KEY from environment variable")
 
         if os.getenv("TAVILY_API_KEY"):
             config["tavily_api_key"] = os.getenv("TAVILY_API_KEY")
@@ -85,6 +85,7 @@ class Config:
             },
             "groq_api_key": None,
             "alpha_vantage_api_key": None,
+            "tavily_api_key": None,
         }
         self.save_config(default_config)
         return default_config
@@ -113,3 +114,6 @@ class Config:
         """Set a configuration value and save it."""
         self.config[key] = value
         self.save_config()
+
+# Alias for compatibility
+ConfigManager = Config

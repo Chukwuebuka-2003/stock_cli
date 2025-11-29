@@ -4,16 +4,25 @@ Streamlit UI for Stock Tracker CLI
 Interactive dashboard for portfolio analysis, stock charts, and technical indicators.
 """
 
+import html
 import logging
 import os
 import sys
+import tempfile
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Any
 
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
+
+try:
+    from markdown import markdown as md_to_html
+except ImportError:  # pragma: no cover
+    md_to_html = None
 
 from src.backtesting import Backtester
 from src.config import ConfigManager
@@ -23,6 +32,13 @@ from src.ml_models import MLPredictor, ProphetPredictor, train_ensemble_models
 from src.portfolio import PortfolioManager
 from src.technical_indicators import TechnicalIndicators
 from src.watchlist import WatchlistManager
+from src.agents.orchestrator import AgentOrchestrator
+from src.rag.vector_store import VectorStore
+from src.rag.embeddings import EmbeddingService
+from src.rag.processor import DocumentProcessor
+from src.sec_filings import SECFilingsClient
+from groq import Groq
+import appdirs
 from stock_cli.file_paths import CONFIG_PATH, POSITIONS_PATH, WATCHLIST_PATH
 
 # Configure logging
@@ -58,6 +74,50 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] {
         padding: 10px 20px;
     }
+    .chat-history {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+    }
+    .chat-bubble {
+        max-width: 75%;
+        padding: 0.9rem 1rem;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background-color: rgba(240, 242, 246, 0.05);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    }
+    .chat-bubble.user {
+        margin-left: auto;
+        background: linear-gradient(135deg, #1f8ef1, #5ac8fa);
+        color: #fff;
+    }
+    .chat-bubble.assistant {
+        margin-right: auto;
+        background: rgba(255,255,255,0.04);
+    }
+    .chat-role {
+        font-size: 0.8rem;
+        opacity: 0.8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.2rem;
+    }
+    .chat-text {
+        font-size: 0.95rem;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+    .chat-input-wrapper {
+        margin-top: 1.5rem;
+        padding: 1rem;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 12px;
+        background-color: rgba(255,255,255,0.03);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,13 +130,20 @@ def get_config_manager():
 
 @st.cache_resource
 def get_data_fetcher():
-    """Get cached DataFetcher instance."""
+    """Get cached DataFetcher instance with Twelve Data."""
     config = get_config_manager()
-    api_key = config.get("ALPHA_VANTAGE_API_KEY")
-    if not api_key:
-        st.error("⚠️ Alpha Vantage API key not configured. Run `stock-tracker setup-alpha-vantage` first.")
+    
+    # Get Twelve Data API key
+    twelvedata_key = config.get("twelvedata_api_key")
+    
+    if not twelvedata_key:
+        st.error("⚠️ Twelve Data API key not configured. Please add TWELVE_DATA_API_KEY to your .env file.")
         st.stop()
-    return DataFetcher(api_key)
+    
+    st.success("✅ Using Twelve Data API (800 calls/day)")
+    
+    return DataFetcher(twelvedata_api_key=twelvedata_key)
+
 
 
 @st.cache_data(ttl=900)  # Cache for 15 minutes
@@ -92,6 +159,202 @@ def get_stock_quote(symbol: str) -> Optional[dict]:
     fetcher = get_data_fetcher()
     return fetcher.get_stock_data(symbol)
 
+
+@st.cache_resource
+def get_embedding_service() -> EmbeddingService:
+    """Load embedding model once per session."""
+    return EmbeddingService()
+
+
+@st.cache_resource
+def get_vector_store() -> VectorStore:
+    """Provide a persistent vector store for RAG features."""
+    try:
+        rag_dir = resolve_rag_directory()
+    except RuntimeError as exc:
+        st.error(f"⚠️ {exc}")
+        st.stop()
+
+    embedding_service = get_embedding_service()
+    return VectorStore(persist_directory=rag_dir, embedding_service=embedding_service)
+
+
+@st.cache_resource
+def get_sec_client(user_agent: str, sec_api_key: Optional[str]) -> SECFilingsClient:
+    """Cache the SEC filings client per user-agent string."""
+    cache_dir = os.path.join(appdirs.user_cache_dir("StockTrackerCLI", "Chukwuebuka"), "sec_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return SECFilingsClient(cache_dir=cache_dir, user_agent=user_agent, sec_api_key=sec_api_key)
+
+
+def _ensure_writable_directory(path: Path) -> Optional[Path]:
+    """Return the path if it is writable, otherwise None."""
+    resolved = path.expanduser()
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+        test_file = resolved / ".write_test"
+        test_file.write_text("ok", encoding="utf-8")
+        test_file.unlink(missing_ok=True)
+        return resolved
+    except OSError as exc:
+        logger.warning("Unable to use vector store directory '%s': %s", resolved, exc)
+        return None
+
+
+def resolve_rag_directory() -> str:
+    """Pick a writable directory for the vector store."""
+    candidates: List[Path] = []
+
+    custom_dir = os.getenv("STOCK_TRACKER_RAG_DIR")
+    if custom_dir:
+        candidates.append(Path(custom_dir))
+
+    appdir_path = Path(appdirs.user_data_dir("StockTrackerCLI", "Chukwuebuka")) / "rag_storage"
+    candidates.append(appdir_path)
+
+    project_root = Path(__file__).resolve().parent.parent
+    candidates.append(project_root / ".rag_storage")
+
+    candidates.append(Path.cwd() / ".rag_storage")
+    candidates.append(Path(tempfile.gettempdir()) / "stock_tracker_cli_rag")
+
+    for candidate in candidates:
+        writable = _ensure_writable_directory(candidate)
+        if writable:
+            return str(writable)
+
+    raise RuntimeError("Unable to find a writable directory for the vector store.")
+
+
+def sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure metadata only contains types supported by Chroma."""
+    sanitized: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if value is None:
+            sanitized[key] = ""
+        elif isinstance(value, (bool, int, float, str)):
+            sanitized[key] = value
+        else:
+            sanitized[key] = str(value)
+    return sanitized
+
+
+def aggregate_positions_by_symbol(positions_list: List[dict]) -> dict:
+    """
+    Aggregate multiple positions of the same symbol.
+    
+    When a user buys the same stock multiple times at different prices,
+    this function combines them into a single position with:
+    - Total quantity (sum of all positions)
+    - Weighted average purchase price (based on cost basis)
+    
+    Args:
+        positions_list: List of position dictionaries
+        
+    Returns:
+        Dictionary with symbol as key and aggregated data as value
+    """
+    aggregated = {}
+    
+    for pos in positions_list:
+        symbol = pos["symbol"]
+        
+        if symbol not in aggregated:
+            aggregated[symbol] = {
+                "symbol": symbol,
+                "quantity": 0,
+                "purchase_price": 0,  # Will be weighted average
+                "total_cost": 0,
+                "positions": []  # Keep track of individual positions
+            }
+        
+        # Calculate cost basis for this position
+        cost = pos["quantity"] * pos["purchase_price"]
+        
+        # Aggregate
+        aggregated[symbol]["quantity"] += pos["quantity"]
+        aggregated[symbol]["total_cost"] += cost
+        aggregated[symbol]["positions"].append(pos)
+    
+    # Calculate weighted average purchase price for each symbol
+    for symbol, data in aggregated.items():
+        if data["quantity"] > 0:
+            data["purchase_price"] = data["total_cost"] / data["quantity"]
+    
+    return aggregated
+
+
+def run_portfolio_optimization(
+    price_history: pd.DataFrame,
+    risk_free_rate: float = 0.02,
+    n_simulations: int = 4000,
+    seed: int = 42
+) -> Dict[str, Any]:
+    """
+    Run a simple Monte Carlo portfolio optimization to approximate the efficient frontier.
+
+    Args:
+        price_history: DataFrame of price history indexed by date with one column per symbol.
+        risk_free_rate: Annual risk-free rate (decimal).
+        n_simulations: Number of random portfolios to simulate.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Dictionary containing frontier data, best Sharpe portfolio, and minimum-volatility portfolio.
+    """
+    if price_history is None or price_history.empty:
+        raise ValueError("Price history is empty. Cannot optimize portfolio.")
+
+    returns = price_history.pct_change().dropna()
+    if returns.empty:
+        raise ValueError("Insufficient historical data to compute returns.")
+
+    mean_returns = returns.mean() * 252  # annualize
+    cov_matrix = returns.cov() * 252     # annualize
+    symbols = list(price_history.columns)
+
+    if len(symbols) < 2:
+        raise ValueError("At least two symbols are required for portfolio optimization.")
+
+    rng = np.random.default_rng(seed)
+    weights = rng.dirichlet(np.ones(len(symbols)), size=n_simulations)
+
+    exp_returns = weights @ mean_returns.values
+    portfolio_vars = np.einsum('ij,jk,ik->i', weights, cov_matrix.values, weights)
+    volatilities = np.sqrt(np.maximum(portfolio_vars, 0))
+
+    sharpe_ratios = np.where(
+        volatilities > 0,
+        (exp_returns - risk_free_rate) / volatilities,
+        0
+    )
+
+    frontier = pd.DataFrame({
+        "expected_return": exp_returns,
+        "volatility": volatilities,
+        "sharpe": sharpe_ratios
+    })
+
+    best_idx = int(np.argmax(sharpe_ratios))
+    min_vol_idx = int(np.argmin(volatilities))
+
+    def build_portfolio(idx: int) -> Dict[str, Any]:
+        weight_map = {symbol: float(weights[idx][i]) for i, symbol in enumerate(symbols)}
+        return {
+            "weights": weight_map,
+            "expected_return": float(exp_returns[idx]),
+            "volatility": float(volatilities[idx]),
+            "sharpe": float(sharpe_ratios[idx])
+        }
+
+    return {
+        "frontier": frontier,
+        "best": build_portfolio(best_idx),
+        "min_vol": build_portfolio(min_vol_idx),
+        "mean_returns": mean_returns,
+        "cov_matrix": cov_matrix,
+        "symbols": symbols
+    }
 
 def format_currency(value: float) -> str:
     """Format value as currency."""
@@ -285,9 +548,24 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, indicators: List[str
 
 
 def create_portfolio_pie_chart(portfolio_data: List[dict]) -> go.Figure:
-    """Create a pie chart showing portfolio composition."""
-    symbols = [p["symbol"] for p in portfolio_data]
-    values = [p["currentValue"] for p in portfolio_data]
+    """Create portfolio composition pie chart."""
+    # Filter out positions with None current value (failed quote fetches)
+    valid_data = [p for p in portfolio_data if p.get("currentValue") is not None]
+    
+    if not valid_data:
+        # No valid data - return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No current price data available",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16)
+        )
+        fig.update_layout(title="Portfolio Composition")
+        return fig
+    
+    symbols = [p["symbol"] for p in valid_data]
+    values = [p["currentValue"] for p in valid_data]
 
     fig = go.Figure(data=[go.Pie(
         labels=symbols,
@@ -308,9 +586,24 @@ def create_portfolio_pie_chart(portfolio_data: List[dict]) -> go.Figure:
 
 
 def create_performance_chart(portfolio_data: List[dict]) -> go.Figure:
-    """Create a bar chart showing individual stock performance."""
-    symbols = [p["symbol"] for p in portfolio_data]
-    gains = [p["gainLoss"] for p in portfolio_data]
+    """Create performance bar chart."""
+    # Filter out positions with None gain/loss (failed quote fetches)
+    valid_data = [p for p in portfolio_data if p.get("gainLoss") is not None]
+    
+    if not valid_data:
+        # No valid data - return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No current price data available",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16)
+        )
+        fig.update_layout(title="Performance by Stock")
+        return fig
+    
+    symbols = [p["symbol"] for p in valid_data]
+    gains = [p["gainLoss"] for p in valid_data]
     colors = ["green" if g > 0 else "red" for g in gains]
 
     fig = go.Figure(data=[go.Bar(
@@ -337,7 +630,10 @@ def display_portfolio_overview():
 
     try:
         portfolio = PortfolioManager(POSITIONS_PATH)
-        positions = portfolio.get_positions()
+        positions_list = portfolio.get_positions()
+        
+        # Aggregate positions by symbol (handles multiple buys of same stock)
+        positions = aggregate_positions_by_symbol(positions_list)
 
         if not positions:
             st.info("📝 No positions in portfolio. Add stocks using the CLI: `stock-tracker add SYMBOL QUANTITY PRICE`")
@@ -351,10 +647,12 @@ def display_portfolio_overview():
 
         for symbol, data in positions.items():
             quote = get_stock_quote(symbol)
+            quantity = data["quantity"]
+            purchase_price = data["purchase_price"]
+            
             if quote:
+                # Successfully fetched current price
                 current_price = quote["currentPrice"]
-                quantity = data["quantity"]
-                purchase_price = data["purchasePrice"]
                 current_value = current_price * quantity
                 cost_basis = purchase_price * quantity
                 gain_loss = current_value - cost_basis
@@ -373,6 +671,23 @@ def display_portfolio_overview():
 
                 total_value += current_value
                 total_cost += cost_basis
+            else:
+                # Quote fetch failed - show position with N/A for current data
+                cost_basis = purchase_price * quantity
+                
+                portfolio_data.append({
+                    "symbol": symbol,
+                    "quantity": quantity,
+                    "purchasePrice": purchase_price,
+                    "currentPrice": None,  # Will display as N/A
+                    "currentValue": None,
+                    "costBasis": cost_basis,
+                    "gainLoss": None,
+                    "gainLossPct": None
+                })
+                
+                total_cost += cost_basis
+                # Note: Don't add to total_value since we don't have current price
 
         # Display key metrics
         total_gain_loss = total_value - total_cost
@@ -414,13 +729,13 @@ def display_portfolio_overview():
         with col1:
             st.plotly_chart(
                 create_portfolio_pie_chart(portfolio_data),
-                use_container_width=True
+                width='stretch'
             )
 
         with col2:
             st.plotly_chart(
                 create_performance_chart(portfolio_data),
-                use_container_width=True
+                width='stretch'
             )
 
         st.markdown("---")
@@ -450,7 +765,7 @@ def display_portfolio_overview():
             subset=["Gain/Loss ($)", "Gain/Loss (%)"]
         )
 
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        st.dataframe(styled_df, width='stretch', hide_index=True)
 
     except Exception as e:
         st.error(f"Error loading portfolio: {e}")
@@ -463,7 +778,10 @@ def display_stock_analysis():
 
     # Stock selector
     portfolio = PortfolioManager(POSITIONS_PATH)
-    positions = portfolio.get_positions()
+    positions_list = portfolio.get_positions()
+    
+    # Aggregate positions by symbol (handles multiple buys of same stock)
+    positions = aggregate_positions_by_symbol(positions_list)
 
     if not positions:
         st.info("📝 No positions in portfolio. Add stocks using the CLI.")
@@ -526,7 +844,7 @@ def display_stock_analysis():
 
         with col4:
             position = positions[selected_symbol]
-            gain_loss = (quote["currentPrice"] - position["purchasePrice"]) * position["quantity"]
+            gain_loss = (quote["currentPrice"] - position["purchase_price"]) * position["quantity"]
             st.metric(
                 label="Your Position P/L",
                 value=format_currency(gain_loss)
@@ -559,7 +877,7 @@ def display_stock_analysis():
 
     # Display chart
     fig = create_candlestick_chart(df, selected_symbol, indicators)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     # Technical signals
     st.subheader("📊 Technical Signals")
@@ -582,7 +900,7 @@ def display_watchlist():
 
     try:
         watchlist = WatchlistManager(WATCHLIST_PATH)
-        stocks = watchlist.list_stocks()
+        stocks = watchlist.get_stocks()
 
         if not stocks:
             st.info("📝 No stocks in watchlist. Add stocks using: `stock-tracker watchlist add SYMBOL`")
@@ -591,7 +909,8 @@ def display_watchlist():
         # Fetch current data for watchlist
         watchlist_data = []
 
-        for symbol, data in stocks.items():
+        for stock in stocks:
+            symbol = stock["symbol"]
             quote = get_stock_quote(symbol)
             if quote:
                 watchlist_data.append({
@@ -600,7 +919,7 @@ def display_watchlist():
                     "Change": quote["change"],
                     "Change %": quote["changePercent"],
                     "Previous Close": quote["previousClose"],
-                    "Note": data.get("note", "")
+                    "Note": stock.get("note", "")
                 })
 
         if watchlist_data:
@@ -615,7 +934,7 @@ def display_watchlist():
                 subset=["Change"]
             )
 
-            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            st.dataframe(styled_df, width='stretch', hide_index=True)
 
         st.markdown("---")
         st.info("💡 Use the CLI to add or remove watchlist items: `stock-tracker watchlist add/remove SYMBOL`")
@@ -630,11 +949,29 @@ def display_ml_predictions():
     st.header("🤖 ML Price Predictions")
 
     portfolio = PortfolioManager(POSITIONS_PATH)
-    positions = portfolio.get_positions()
+    positions_list = portfolio.get_positions()
+    
+    # Aggregate positions by symbol (handles multiple buys of same stock)
+    positions = aggregate_positions_by_symbol(positions_list)
 
     if not positions:
         st.info("📝 No positions in portfolio. Add stocks using the CLI.")
         return
+
+    # Warning about data limitations
+    # Warning about data limitations
+    # Twelve Data free tier supports historical data, but we should still be mindful of limits
+    st.info(
+        "💡 **Tip**: ML models require significant historical data (500+ days) for reliable predictions. "
+        "Ensure your API plan supports the requested data range."
+    )
+    
+    st.info(
+        "💡 **Tip**: With limited data, the technical analysis in the 'Stock Analysis' tab "
+        "provides more reliable insights than ML predictions."
+    )
+    
+    st.markdown("---")
 
     # Model selection
     col1, col2, col3 = st.columns([2, 2, 1])
@@ -673,16 +1010,32 @@ def display_ml_predictions():
                 df = get_historical_data(selected_symbol, period)
 
                 if df is None or len(df) < 100:
-                    st.error("Insufficient data for training. Try a longer period.")
+                    st.error(
+                        "❌ **Insufficient Data**: Unable to fetch enough historical data for training. "
+                        f"Received only {len(df) if df is not None else 0} days of data."
+                    )
+                    st.info(
+                        "💡 Ensure your API key has access to historical data. "
+                        "ML models need 500+ days for reliable predictions. "
+                        "Consider upgrading to Premium for full historical data access."
+                    )
                     return
 
-                st.info(f"Training on {len(df)} days of historical data...")
+                st.info(f"📊 Training on {len(df)} days of historical data...")
 
                 # Train ensemble models
                 results = train_ensemble_models(df, selected_symbol, horizon)
 
                 if not results:
-                    st.error("Failed to train models.")
+                    st.error(
+                        "❌ **Training Failed**: Unable to train models with available data. "
+                        "This typically happens when there's insufficient data after feature engineering."
+                    )
+                    st.info(
+                        "🔍 **Why this happens**: Creating technical indicators (50-day moving averages, etc.) "
+                        "requires sufficient historical data. "
+                        "After removing incomplete rows, there's not enough data left for training."
+                    )
                     return
 
                 # Display results in tabs
@@ -741,7 +1094,7 @@ def display_ml_predictions():
                         hovermode="x unified"
                     )
 
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                     # Show prediction table
                     st.subheader("Forecast Values")
@@ -751,7 +1104,7 @@ def display_ml_predictions():
                             "Lower_Bound": "${:.2f}",
                             "Upper_Bound": "${:.2f}"
                         }),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True
                     )
 
@@ -793,7 +1146,7 @@ def display_ml_predictions():
                         yaxis=dict(autorange="reversed")
                     )
 
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                     # Confusion matrix
                     if 'confusion_matrix' in rf_metrics:
@@ -815,7 +1168,7 @@ def display_ml_predictions():
                             height=400
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
 
                 # XGBoost tab
                 with pred_tabs[2]:
@@ -855,7 +1208,29 @@ def display_ml_predictions():
                         yaxis=dict(autorange="reversed")
                     )
 
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
+                    
+                    # Confusion matrix
+                    if 'confusion_matrix' in xgb_metrics:
+                        st.subheader("Confusion Matrix")
+                        cm = np.array(xgb_metrics['confusion_matrix'])
+
+                        fig = go.Figure(data=go.Heatmap(
+                            z=cm,
+                            x=['Predicted Down', 'Predicted Up'],
+                            y=['Actual Down', 'Actual Up'],
+                            colorscale='Greens',
+                            text=cm,
+                            texttemplate='%{text}',
+                            textfont={"size": 16}
+                        ))
+
+                        fig.update_layout(
+                            title="Confusion Matrix",
+                            height=400
+                        )
+
+                        st.plotly_chart(fig, width='stretch')
 
                 # Model comparison tab
                 with pred_tabs[3]:
@@ -880,7 +1255,7 @@ def display_ml_predictions():
                             'Recall': '{:.2%}',
                             'F1 Score': '{:.2%}'
                         }),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True
                     )
 
@@ -913,7 +1288,7 @@ def display_ml_predictions():
                         height=500
                     )
 
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                     # Recommendations
                     st.subheader("💡 Model Recommendations")
@@ -942,11 +1317,28 @@ def display_backtesting():
     st.header("📊 Strategy Backtesting")
 
     portfolio = PortfolioManager(POSITIONS_PATH)
-    positions = portfolio.get_positions()
+    positions_list = portfolio.get_positions()
+    
+    # Aggregate positions by symbol (handles multiple buys of same stock)
+    positions = aggregate_positions_by_symbol(positions_list)
 
     if not positions:
         st.info("📝 No positions in portfolio. Add stocks using the CLI.")
         return
+
+    # Warning about data limitations
+    # Warning about data limitations
+    st.info(
+        "💡 **Tip**: Backtesting requires significant historical data. "
+        "Ensure your API plan supports the requested data range."
+    )
+    
+    st.info(
+        "💡 **Tip**: With limited data, the technical analysis and current portfolio metrics "
+        "provide more reliable insights than backtesting."
+    )
+    
+    st.markdown("---")
 
     # Configuration
     col1, col2, col3 = st.columns(3)
@@ -1100,7 +1492,7 @@ def display_backtesting():
                     hovermode="x unified"
                 )
 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
                 # Comparison with buy-and-hold
                 st.subheader("📊 Strategy vs Buy-and-Hold")
@@ -1141,16 +1533,525 @@ def display_backtesting():
                                 'proceeds': '${:.2f}',
                                 'equity': '${:,.2f}'
                             }),
-                            use_container_width=True,
+                            width='stretch',
                             hide_index=True
                         )
 
             except Exception as e:
-                st.error(f"Error during backtesting: {e}")
+                if "Insufficient data" in str(e):
+                    st.error(
+                        "❌ **Backtesting Failed**: Unable to train model with available data. "
+                        "This typically happens when there's insufficient data after feature engineering."
+                    )
+                    st.info(
+                        "🔍 **Why this happens**: Creating technical indicators (50-day moving averages, etc.) "
+                        "requires sufficient historical data. "
+                        "After removing incomplete rows, there's not enough data left for training."
+                    )
+                else:
+                    st.error(f"Error during backtesting: {e}")
                 logger.error(f"Backtesting error: {e}", exc_info=True)
 
     else:
         st.info("👆 Click the button above to run backtest")
+
+    # Portfolio optimization + risk analytics
+    st.markdown("---")
+    st.subheader("⚖️ Portfolio Optimization & Risk Analytics")
+
+    available_symbols = list(positions.keys())
+    if len(available_symbols) < 2:
+        st.info("Add at least two positions to unlock portfolio optimization analytics.")
+        return
+
+    opt_col1, opt_col2, opt_col3 = st.columns([2, 1, 1])
+
+    with opt_col1:
+        selected_assets = st.multiselect(
+            "Select Assets",
+            options=available_symbols,
+            default=available_symbols,
+            key="opt_assets"
+        )
+
+    with opt_col2:
+        optimization_period = st.selectbox(
+            "Historical Window",
+            options=["6mo", "1y", "3y", "5y"],
+            index=1,
+            key="opt_period"
+        )
+
+    with opt_col3:
+        risk_free_rate = st.number_input(
+            "Risk-Free Rate (%)",
+            min_value=0.0,
+            max_value=10.0,
+            value=2.0,
+            step=0.25,
+            key="opt_risk_free"
+        )
+
+    simulations = st.slider(
+        "Simulated Portfolios",
+        min_value=1000,
+        max_value=10000,
+        value=4000,
+        step=500,
+        key="opt_simulations"
+    )
+
+    if st.button("🚀 Optimize Portfolio", key="run_portfolio_optimization"):
+        if len(selected_assets) < 2:
+            st.warning("Select at least two assets to optimize.")
+        else:
+            with st.spinner("Running mean-variance optimization..."):
+                price_series = {}
+                unavailable_assets = []
+
+                for symbol in selected_assets:
+                    hist = get_historical_data(symbol, optimization_period)
+                    if hist is None or hist.empty or 'Close' not in hist.columns:
+                        unavailable_assets.append(symbol)
+                        continue
+
+                    series = hist[['Date', 'Close']].copy()
+                    series['Date'] = pd.to_datetime(series['Date'])
+                    series = series.set_index('Date')['Close']
+                    price_series[symbol] = series
+
+                if len(price_series) < 2:
+                    st.error("Unable to gather overlapping price history for the selected assets.")
+                    if unavailable_assets:
+                        st.info(f"No historical data for: {', '.join(unavailable_assets)}")
+                    return
+
+                price_history = pd.DataFrame(price_series).dropna()
+
+                if price_history.empty or len(price_history) < 30:
+                    st.error("Not enough overlapping historical data to run optimization.")
+                    return
+
+                try:
+                    optimization_results = run_portfolio_optimization(
+                        price_history=price_history,
+                        risk_free_rate=risk_free_rate / 100,
+                        n_simulations=simulations
+                    )
+
+                    best_portfolio = optimization_results['best']
+                    min_vol_portfolio = optimization_results['min_vol']
+                    frontier = optimization_results['frontier']
+                    symbols = optimization_results['symbols']
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.metric(
+                            "Max Sharpe Return",
+                            f"{best_portfolio['expected_return'] * 100:.2f}%",
+                            help="Annualized expected return of the recommended allocation"
+                        )
+
+                    with col2:
+                        st.metric(
+                            "Max Sharpe Volatility",
+                            f"{best_portfolio['volatility'] * 100:.2f}%",
+                            help="Annualized standard deviation of returns"
+                        )
+
+                    with col3:
+                        st.metric(
+                            "Sharpe Ratio",
+                            f"{best_portfolio['sharpe']:.2f}",
+                            help="(Return - Risk Free) / Volatility"
+                        )
+
+                    st.subheader("Recommended Allocation (Max Sharpe)")
+                    weights_df = pd.DataFrame([
+                        {
+                            "Symbol": symbol,
+                            "Allocation (%)": best_portfolio['weights'].get(symbol, 0) * 100
+                        }
+                        for symbol in symbols
+                    ])
+
+                    st.dataframe(
+                        weights_df.style.format({"Allocation (%)": "{:.2f}"}),
+                        hide_index=True,
+                        width='stretch'
+                    )
+
+                    cov_matrix = optimization_results['cov_matrix']
+                    weight_vector = np.array([best_portfolio['weights'].get(symbol, 0) for symbol in symbols])
+                    portfolio_variance = float(weight_vector.T @ cov_matrix.values @ weight_vector)
+
+                    if portfolio_variance > 0:
+                        marginal_contrib = cov_matrix.values @ weight_vector
+                        risk_contrib = weight_vector * marginal_contrib / portfolio_variance
+                        risk_df = pd.DataFrame({
+                            "Symbol": symbols,
+                            "Risk Contribution (%)": risk_contrib * 100
+                        })
+
+                        st.subheader("Risk Contribution by Asset")
+                        st.dataframe(
+                            risk_df.style.format({"Risk Contribution (%)": "{:.2f}"}),
+                            hide_index=True,
+                            width='stretch'
+                        )
+
+                    st.subheader("Efficient Frontier (Simulated)")
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=frontier['volatility'] * 100,
+                        y=frontier['expected_return'] * 100,
+                        mode='markers',
+                        marker=dict(
+                            size=6,
+                            color=frontier['sharpe'],
+                            colorscale='Viridis',
+                            showscale=True,
+                            colorbar=dict(title="Sharpe")
+                        ),
+                        name="Simulated Portfolios",
+                        hovertemplate="Volatility: %{x:.2f}%<br>Return: %{y:.2f}%<extra></extra>"
+                    ))
+
+                    fig.add_trace(go.Scatter(
+                        x=[best_portfolio['volatility'] * 100],
+                        y=[best_portfolio['expected_return'] * 100],
+                        mode='markers',
+                        marker=dict(size=12, color='red'),
+                        name="Max Sharpe"
+                    ))
+
+                    fig.add_trace(go.Scatter(
+                        x=[min_vol_portfolio['volatility'] * 100],
+                        y=[min_vol_portfolio['expected_return'] * 100],
+                        mode='markers',
+                        marker=dict(size=12, color='orange'),
+                        name="Min Volatility"
+                    ))
+
+                    fig.update_layout(
+                        xaxis_title="Volatility (%)",
+                        yaxis_title="Expected Return (%)",
+                        height=500,
+                        legend=dict(orientation="h", y=-0.2),
+                        hovermode="closest"
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"Portfolio optimization failed: {e}")
+
+
+def display_sec_filings():
+    """Display SEC filings ingestion and question-answering."""
+    st.header("📄 SEC Filings Intelligence")
+
+    portfolio = PortfolioManager(POSITIONS_PATH)
+    positions = portfolio.get_positions()
+    default_symbol = positions[0]['symbol'] if positions else "AAPL"
+
+    config = get_config_manager()
+    sec_api_key = config.get("sec_api_key") or os.getenv("SEC_API_KEY")
+    contact_email = (
+        config.get("sec_contact_email")
+        or config.get("contact_email")
+        or config.get("user_email")
+        or config.get("email")
+    )
+    default_user_agent = config.get("sec_user_agent") or (
+        f"StockTrackerCLI/1.0 ({contact_email})" if contact_email else "StockTrackerCLI/1.0 (your-email@example.com)"
+    )
+
+    user_agent = st.text_input(
+        "SEC User-Agent",
+        value=default_user_agent,
+        help="SEC requires a descriptive user-agent string that includes your contact information."
+    ).strip()
+
+    ticker = st.text_input(
+        "Ticker Symbol",
+        value=default_symbol,
+        max_chars=10,
+        help="Company ticker to fetch filings for."
+    ).upper().strip()
+
+    form_type = st.selectbox(
+        "Form Type",
+        options=["10-K", "10-Q", "8-K", "13F", "S-1", "All"],
+        index=0
+    )
+
+    filings_limit = st.slider("Recent Filings", min_value=1, max_value=5, value=3)
+
+    if not sec_api_key:
+        st.info("Tip: add SEC_API_KEY to enable sec-api for faster, more reliable filing search.")
+
+    if st.button("📥 Fetch Filings", type="primary"):
+        if not user_agent or "your-email" in user_agent.lower():
+            st.warning("Provide a valid SEC-compliant user-agent (e.g., 'YourApp/1.0 (you@example.com)').")
+        elif not ticker:
+            st.warning("Enter a ticker symbol to continue.")
+        else:
+            with st.spinner(f"Downloading {form_type} filings for {ticker}..."):
+                try:
+                    sec_client = get_sec_client(user_agent, sec_api_key)
+                    normalized_form = None if form_type == "All" else form_type
+                    filings = sec_client.fetch_filings(
+                        symbol=ticker,
+                        form_type=normalized_form,
+                        limit=filings_limit
+                    )
+                except Exception as e:
+                    st.error(f"Unable to download filings: {e}")
+                    filings = []
+
+            if filings:
+                vector_store = get_vector_store()
+                documents, metadatas, ids = [], [], []
+
+                for filing in filings:
+                    metadata = sanitize_metadata({
+                        "symbol": filing['symbol'],
+                        "form_type": filing['form_type'],
+                        "filing_date": filing['filing_date'],
+                        "report_date": filing.get('report_date'),
+                        "accession_number": filing['accession_number'],
+                        "source": f"{filing['symbol']}_{filing['accession_number']}",
+                        "url": filing['document_url']
+                    })
+                    processed_docs = DocumentProcessor.process_document(
+                        content=filing['content'],
+                        metadata=metadata,
+                        chunk_size=1200
+                    )
+                    for doc in processed_docs:
+                        documents.append(doc['text'])
+                        metadatas.append(doc['metadata'])
+                        ids.append(doc['id'])
+
+                if documents:
+                    vector_store.add_documents(
+                        documents=documents,
+                        metadatas=metadatas,
+                        ids=ids,
+                        collection_name="sec_filings"
+                    )
+                    st.success(f"Ingested {len(documents)} chunks from {len(filings)} filing(s).")
+
+                rows = []
+                for filing in filings:
+                    snippet = DocumentProcessor.clean_text(filing['content'][:800])[:400]
+                    rows.append({
+                        "Form": filing['form_type'],
+                        "Filing Date": filing['filing_date'],
+                        "Report Date": filing.get('report_date', '—'),
+                        "Accession #": filing['accession_number'],
+                        "Primary Document": filing['document_url'],
+                        "Summary": snippet + ("…" if len(snippet) == 400 else "")
+                    })
+
+                st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+
+                for filing in filings:
+                    with st.expander(f"{filing['form_type']} • {filing['filing_date']} • {filing['accession_number']}"):
+                        st.markdown(f"[View Filing Index]({filing['filing_url']})")
+                        st.markdown(f"[Primary Document]({filing['document_url']})")
+                        st.write(DocumentProcessor.clean_text(filing['content'][:1200]) + "…")
+
+                st.session_state["sec_filings_indexed"] = True
+            else:
+                st.info("No filings were returned for the selected filters.")
+
+    st.markdown("---")
+    st.subheader("Ask Questions About Indexed Filings")
+    question = st.text_area(
+        "What would you like to know?",
+        placeholder="e.g., What risks did the latest 10-K highlight?"
+    )
+    symbol_filter = st.text_input(
+        "Limit answers to ticker (optional)",
+        value=ticker,
+        help="Results will be filtered to filings for this symbol if provided."
+    ).strip().upper()
+
+    if st.button("🧠 Analyze Filings"):
+        if not question.strip():
+            st.warning("Enter a question to analyze.")
+            return
+
+        groq_key = config.get("groq_api_key")
+        if not groq_key:
+            st.error("Groq API key not configured. Run `stock-tracker setup-ai` first.")
+            return
+
+        try:
+            vector_store = get_vector_store()
+            search_results = vector_store.query_similar(
+                query=question,
+                n_results=8,
+                collection_name="sec_filings"
+            )
+        except Exception as e:
+            st.error(f"Unable to search indexed filings: {e}")
+            return
+
+        documents = search_results.get("documents", [[]])
+        metadatas = search_results.get("metadatas", [[]])
+
+        if symbol_filter and documents and documents[0]:
+            filtered_docs = []
+            filtered_metadatas = []
+            for doc, meta in zip(documents[0], metadatas[0]):
+                if meta and meta.get("symbol", "").upper() == symbol_filter:
+                    filtered_docs.append(doc)
+                    filtered_metadatas.append(meta)
+            documents = [filtered_docs]
+            metadatas = [filtered_metadatas]
+
+        if not documents or not documents[0]:
+            st.warning("No SEC filings have been indexed yet. Fetch filings first.")
+            return
+
+        contexts = []
+        for doc, meta in zip(documents[0], metadatas[0]):
+            symbol = meta.get("symbol", "Unknown")
+            form = meta.get("form_type", "Form")
+            filing_date = meta.get("filing_date", "N/A")
+            contexts.append(f"{symbol} {form} ({filing_date}):\n{doc}")
+
+        context_text = "\n\n---\n\n".join(contexts)
+
+        groq_client = Groq(api_key=groq_key)
+        with st.spinner("Generating analysis..."):
+            try:
+                completion = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    temperature=0.2,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a professional equity analyst. "
+                                "Use the provided SEC filing excerpts to answer the user's question. "
+                                "Cite the relevant forms and filing dates when possible."
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": f"Context:\n{context_text}\n\nQuestion: {question}"
+                        }
+                    ]
+                )
+                st.markdown(completion.choices[0].message.content)
+            except Exception as e:
+                st.error(f"Groq analysis failed: {e}")
+
+
+def display_chat():
+    """Display AI Chat tab."""
+    st.header("💬 AI Financial Assistant")
+    
+    # Initialize session state for chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    st.markdown('<div class="chat-history">', unsafe_allow_html=True)
+    for message in st.session_state.messages:
+        role = message.get("role", "assistant")
+        role_class = "user" if role == "user" else "assistant"
+        role_label = "You" if role == "user" else "Advisor"
+        raw_content = message.get("content", "")
+
+        if role == "assistant" and md_to_html:
+            rendered_content = md_to_html(raw_content)
+        else:
+            rendered_content = html.escape(raw_content).replace("\n", "<br>")
+        st.markdown(
+            f"""
+            <div class="chat-bubble {role_class}">
+                <div class="chat-role">{role_label}</div>
+                <div class="chat-text">{rendered_content}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    status_placeholder = st.empty()
+
+    with st.form("chat_form", clear_on_submit=True):
+        st.markdown('<div class="chat-input-wrapper">', unsafe_allow_html=True)
+        cols = st.columns([5, 1])
+        with cols[0]:
+            prompt = st.text_area(
+                "Your message",
+                key="chat_input_text",
+                placeholder="Ask about your portfolio or market trends...",
+                height=100,
+                label_visibility="collapsed",
+            )
+        with cols[1]:
+            submitted = st.form_submit_button("Send", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if submitted:
+        prompt = (prompt or "").strip()
+        if not prompt:
+            status_placeholder.warning("Please enter a question to chat.")
+            return
+
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        with status_placeholder, st.spinner("Assistant is thinking..."):
+            try:
+                config = get_config_manager()
+                groq_key = config.get("groq_api_key")
+                
+                if not groq_key:
+                    st.error("Groq API key not configured.")
+                    return
+
+                tavily_key = config.get("tavily_api_key") or os.getenv("TAVILY_API_KEY")
+                if tavily_key:
+                    os.environ.setdefault("TAVILY_API_KEY", tavily_key)
+                else:
+                    st.info(
+                        "Tavily API key not set. Web search context will be limited."
+                    )
+
+                twelvedata_key = config.get("twelvedata_api_key") or os.getenv("TWELVE_DATA_API_KEY")
+                data_fetcher = None
+                if twelvedata_key:
+                    data_fetcher = DataFetcher(twelvedata_api_key=twelvedata_key)
+                else:
+                    st.info(
+                        "Twelve Data API key not set. Live price lookups unavailable in chat responses."
+                    )
+                    
+                # Initialize components
+                groq_client = Groq(api_key=groq_key)
+                vector_store = get_vector_store()
+                orchestrator = AgentOrchestrator(
+                    model_client=groq_client,
+                    vector_store=vector_store,
+                    tavily_api_key=tavily_key,
+                    data_fetcher=data_fetcher,
+                )
+                
+                response = orchestrator.run(prompt)
+                st.session_state.messages.append({"role": "assistant", "content": response})
+                try:
+                    st.rerun()
+                except AttributeError:
+                    st.experimental_rerun()
+                
+            except Exception as e:
+                st.error(f"Error generating response: {e}")
 
 
 def main():
@@ -1189,12 +2090,14 @@ def main():
     st.title("📊 Stock Portfolio Dashboard")
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Portfolio Overview",
         "Stock Analysis",
         "🤖 ML Predictions",
         "📊 Backtesting",
-        "Watchlist"
+        "📄 SEC Filings",
+        "Watchlist",
+        "💬 AI Chat"
     ])
 
     with tab1:
@@ -1210,7 +2113,30 @@ def main():
         display_backtesting()
 
     with tab5:
+        display_sec_filings()
+
+    with tab6:
         display_watchlist()
+        
+    with tab7:
+        display_chat()
+
+
+
+def launch_ui():
+    """Launch the Streamlit application."""
+    import sys
+    import os
+    from streamlit.web import cli as stcli
+
+    # Get the absolute path of this file
+    file_path = os.path.abspath(__file__)
+
+    # Construct the command
+    sys.argv = ["streamlit", "run", file_path]
+
+    # Run streamlit
+    sys.exit(stcli.main())
 
 
 if __name__ == "__main__":

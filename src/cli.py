@@ -13,6 +13,12 @@ from .history import PortfolioHistory
 from .portfolio import Portfolio
 from .reporting import Reporting
 from .watchlist import Watchlist
+from .agents.orchestrator import AgentOrchestrator
+from .rag.vector_store import VectorStore
+from .rag.embeddings import EmbeddingService
+from groq import Groq
+import appdirs
+
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +150,56 @@ def ai_report(email, events):
         else:
             click.echo("❌ Failed to send email. Please check your settings and logs.")
 
+
+@cli.command()
+@click.argument("query", nargs=-1)
+def chat(query):
+    """Chat with the AI about your portfolio and the market"""
+    query_text = " ".join(query)
+    if not query_text:
+        query_text = click.prompt("What would you like to know?")
+
+    config = Config()
+    groq_key = config.get("groq_api_key")
+    if not groq_key:
+        click.echo("Groq API key not configured. Please run 'setup-ai' first.")
+        return
+
+    tavily_key = config.get("tavily_api_key") or os.getenv("TAVILY_API_KEY")
+    if tavily_key:
+        os.environ.setdefault("TAVILY_API_KEY", tavily_key)
+
+    twelvedata_key = config.get("twelvedata_api_key") or os.getenv("TWELVE_DATA_API_KEY")
+    data_fetcher = None
+    if twelvedata_key:
+        data_fetcher = DataFetcher(twelvedata_api_key=twelvedata_key)
+    else:
+        click.echo("⚠️  Twelve Data API key not configured. Live prices unavailable in chat responses.")
+
+    # Initialize components
+    click.echo("Initializing agents...")
+    groq_client = Groq(api_key=groq_key)
+    
+    # Initialize RAG
+    user_data_dir = appdirs.user_data_dir("StockTrackerCLI", "Chukwuebuka")
+    rag_dir = os.path.join(user_data_dir, "rag_storage")
+    embedding_service = EmbeddingService()
+    vector_store = VectorStore(persist_directory=rag_dir, embedding_service=embedding_service)
+    
+    orchestrator = AgentOrchestrator(
+        model_client=groq_client,
+        vector_store=vector_store,
+        tavily_api_key=tavily_key,
+        data_fetcher=data_fetcher,
+    )
+    
+    click.echo(f"\nProcessing query: {query_text}\n")
+    response = orchestrator.run(query_text)
+    
+    click.echo("\n" + "="*60)
+    click.echo("AI Response:")
+    click.echo("="*60 + "\n")
+    click.echo(response)
 
 @cli.command()
 def setup_ai():

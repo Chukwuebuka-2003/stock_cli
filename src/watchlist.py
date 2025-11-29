@@ -126,3 +126,6 @@ class Watchlist:
 
         logger.warning(f"{symbol} not found in watchlist")
         return False
+
+# Alias for compatibility
+WatchlistManager = Watchlist
