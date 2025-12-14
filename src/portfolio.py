@@ -104,3 +104,6 @@ class Portfolio:
     def get_positions(self):
         """Get all positions."""
         return self.positions
+
+# Alias for compatibility
+PortfolioManager = Portfolio
