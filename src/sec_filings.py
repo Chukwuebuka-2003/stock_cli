@@ -51,16 +51,43 @@ class SECFilingsClient:
                     logger.error(f"Failed to initialize sec-api client: {e}")
                     self.query_api = None
 
+    @staticmethod
+    def _validate_symbol(symbol: str) -> str:
+        """
+        Validate and sanitize a stock symbol.
+
+        Args:
+            symbol: The stock ticker symbol to validate
+
+        Returns:
+            The validated and sanitized symbol (uppercase, alphanumeric only)
+
+        Raises:
+            ValueError: If the symbol is invalid
+        """
+        if not symbol or not isinstance(symbol, str):
+            raise ValueError("Symbol must be a non-empty string")
+
+        # Clean and validate symbol (allow only alphanumeric, max 10 chars)
+        clean_symbol = symbol.strip().upper()
+        if not clean_symbol.isalnum() or len(clean_symbol) > 10 or len(clean_symbol) == 0:
+            raise ValueError("Symbol must be 1-10 alphanumeric characters")
+
+        return clean_symbol
+
     def fetch_filings(self, symbol: str, form_type: Optional[str] = None, limit: int = 3) -> List[Dict]:
         """
         Fetch recent filings (metadata + raw content) for a ticker.
         """
+        # Validate and sanitize the symbol to prevent injection
+        validated_symbol = self._validate_symbol(symbol)
+
         if self.query_api:
-            filings = self._get_filings_via_sec_api(symbol, form_type=form_type, limit=limit)
+            filings = self._get_filings_via_sec_api(validated_symbol, form_type=form_type, limit=limit)
         else:
-            cik = self._get_cik(symbol)
+            cik = self._get_cik(validated_symbol)
             if not cik:
-                raise ValueError(f"Unable to find CIK for symbol '{symbol}'.")
+                raise ValueError(f"Unable to find CIK for symbol '{validated_symbol}'.")
             filings = self._get_recent_filings(cik, form_type=form_type, limit=limit)
         results = []
         for filing in filings:
@@ -68,7 +95,7 @@ class SECFilingsClient:
             if not content:
                 continue
             filing['content'] = content
-            filing['symbol'] = symbol.upper()
+            filing['symbol'] = validated_symbol
             results.append(filing)
 
         return results

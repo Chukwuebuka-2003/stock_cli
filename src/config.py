@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import stat
 from dotenv import load_dotenv
 
 from stock_cli.file_paths import CONFIG_PATH
@@ -9,6 +10,9 @@ from stock_cli.file_paths import CONFIG_PATH
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Secure file permission mode (owner read/write only)
+SECURE_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR  # 0o600
 
 
 class Config:
@@ -92,7 +96,11 @@ class Config:
 
     def save_config(self, config_data=None):
         """
-        Save configuration to a JSON file.
+        Save configuration to a JSON file with secure permissions.
+
+        The config file is created with restrictive permissions (0o600 - owner read/write only)
+        since it may contain sensitive data like API keys and passwords.
+
         Args:
             config_data (dict, optional): The configuration data to save.
                                           If None, saves the current self.config.
@@ -100,9 +108,28 @@ class Config:
         if config_data is None:
             config_data = self.config
         try:
-            with open(self.config_path, "w") as f:
-                json.dump(config_data, f, indent=4)
-            logger.info(f"Configuration saved successfully to {self.config_path}")
+            # Ensure parent directory exists
+            config_dir = os.path.dirname(self.config_path)
+            if config_dir:
+                os.makedirs(config_dir, exist_ok=True)
+
+            # Write to file with secure permissions
+            # Use os.open with secure mode to create file with proper permissions from the start
+            fd = os.open(
+                self.config_path,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                SECURE_FILE_MODE
+            )
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(config_data, f, indent=4)
+            except Exception:
+                os.close(fd)
+                raise
+
+            # Also ensure permissions are correct for existing files
+            os.chmod(self.config_path, SECURE_FILE_MODE)
+            logger.info(f"Configuration saved securely to {self.config_path}")
         except IOError as e:
             logger.error(f"Error saving config file: {e}")
 

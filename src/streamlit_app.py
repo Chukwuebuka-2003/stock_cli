@@ -20,13 +20,63 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 try:
-    from markdown import markdown as md_to_html
+    import bleach
+    from markdown import markdown as _md_to_html
+
+    # Safe HTML tags and attributes for sanitized markdown output
+    ALLOWED_TAGS = [
+        'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'code', 'pre',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li', 'blockquote', 'hr',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'a', 'span', 'div'
+    ]
+    ALLOWED_ATTRIBUTES = {
+        'a': ['href', 'title'],
+        '*': ['class']
+    }
+
+    def md_to_html(text: str) -> str:
+        """Convert markdown to sanitized HTML to prevent XSS."""
+        raw_html = _md_to_html(text)
+        # Sanitize the HTML output to remove potentially malicious content
+        return bleach.clean(
+            raw_html,
+            tags=ALLOWED_TAGS,
+            attributes=ALLOWED_ATTRIBUTES,
+            strip=True
+        )
 except ImportError:  # pragma: no cover
     md_to_html = None
+
+from urllib.parse import urlparse
 
 from src.backtesting import Backtester
 from src.config import ConfigManager
 from src.data_fetcher import DataFetcher
+
+
+def is_safe_url(url: str) -> bool:
+    """
+    Validate that a URL is safe (http/https scheme only).
+    Prevents javascript:, data:, vbscript: and other dangerous URL schemes.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+        return parsed.scheme in ('http', 'https')
+    except Exception:
+        return False
+
+
+def sanitize_url_for_display(url: str) -> str:
+    """
+    Return the URL if it's safe, otherwise return '#' as a safe fallback.
+    """
+    return url if is_safe_url(url) else '#'
+
+
 from src.feature_engineering import FeatureEngineer
 from src.ml_models import MLPredictor, ProphetPredictor, train_ensemble_models
 from src.portfolio import PortfolioManager
@@ -1859,9 +1909,14 @@ def display_sec_filings():
                 st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
 
                 for filing in filings:
-                    with st.expander(f"{filing['form_type']} • {filing['filing_date']} • {filing['accession_number']}"):
-                        st.markdown(f"[View Filing Index]({filing['filing_url']})")
-                        st.markdown(f"[Primary Document]({filing['document_url']})")
+                    with st.expander(f"{html.escape(filing['form_type'])} • {html.escape(filing['filing_date'])} • {html.escape(filing['accession_number'])}"):
+                        # Validate URLs before displaying to prevent malicious URL schemes
+                        filing_url = sanitize_url_for_display(filing['filing_url'])
+                        document_url = sanitize_url_for_display(filing['document_url'])
+                        if filing_url != '#':
+                            st.markdown(f"[View Filing Index]({filing_url})")
+                        if document_url != '#':
+                            st.markdown(f"[Primary Document]({document_url})")
                         st.write(DocumentProcessor.clean_text(filing['content'][:1200]) + "…")
 
                 st.session_state["sec_filings_indexed"] = True
@@ -2051,7 +2106,9 @@ def display_chat():
                     st.experimental_rerun()
                 
             except Exception as e:
-                st.error(f"Error generating response: {e}")
+                # Log the actual error for debugging but don't expose details to users
+                logger.error(f"Error generating response: {e}", exc_info=True)
+                st.error("An error occurred while generating the response. Please try again.")
 
 
 def main():
