@@ -1,3 +1,4 @@
+import html
 import logging
 import smtplib
 import socket
@@ -5,8 +6,32 @@ import ssl
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def is_safe_url(url: str) -> bool:
+    """
+    Validate that a URL is safe (http/https scheme only).
+    Prevents javascript:, data:, vbscript: and other dangerous URL schemes.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+        return parsed.scheme in ('http', 'https')
+    except Exception:
+        return False
+
+
+def sanitize_url_for_html(url: str) -> str:
+    """
+    Return the HTML-escaped URL if it's safe, otherwise return '#' as a safe fallback.
+    """
+    if is_safe_url(url):
+        return html.escape(url)
+    return '#'
 
 
 class Reporting:
@@ -88,13 +113,19 @@ class Reporting:
             events_html += '<p style="color: #666; font-size: 14px;">This report was triggered by significant market events affecting your portfolio:</p>'
 
             for symbol, events in market_events["symbol_events"].items():
-                events_html += f'<div style="margin: 15px 0;"><h3 style="color: #1a73e8; margin-bottom: 10px;">{symbol}</h3>'
+                # Escape symbol to prevent XSS
+                safe_symbol = html.escape(str(symbol))
+                events_html += f'<div style="margin: 15px 0;"><h3 style="color: #1a73e8; margin-bottom: 10px;">{safe_symbol}</h3>'
                 for event in events[:3]:  # Limit to top 3 events per symbol
+                    # Escape all event data to prevent XSS
+                    safe_title = html.escape(str(event.get("title", "")))
+                    safe_content = html.escape(str(event.get("content", ""))[:200])
+                    safe_url = sanitize_url_for_html(event.get("url", ""))
                     events_html += f'''
                     <div style="border-left: 3px solid #1a73e8; padding-left: 15px; margin-bottom: 15px;">
-                        <p style="font-weight: bold; margin: 5px 0;">{event.get("title", "")}</p>
-                        <p style="margin: 5px 0; color: #666;">{event.get("content", "")[:200]}...</p>
-                        <p style="margin: 5px 0;"><a href="{event.get("url", "")}" style="color: #1a73e8;">Read more →</a></p>
+                        <p style="font-weight: bold; margin: 5px 0;">{safe_title}</p>
+                        <p style="margin: 5px 0; color: #666;">{safe_content}...</p>
+                        <p style="margin: 5px 0;"><a href="{safe_url}" style="color: #1a73e8;">Read more →</a></p>
                     </div>
                     '''
                 events_html += '</div>'
@@ -103,14 +134,17 @@ class Reporting:
         # AI Analysis HTML Formatting
         ai_html = ""
         if ai_analysis:
-            # Simple conversion of markdown-like bold to HTML bold
-            formatted_analysis = ai_analysis.replace("**", "<b>").replace(
-                "</b>", "</b>", 1
-            )
+            # First escape HTML to prevent XSS, then apply safe formatting
+            safe_analysis = html.escape(str(ai_analysis))
+            # Convert markdown-like bold markers to HTML bold tags
+            # Since content is escaped, we need to handle the escaped ** as well
+            formatted_analysis = safe_analysis.replace("**", "<b>")
+            # Replace newlines with <br> and double spaces with non-breaking spaces
+            formatted_analysis = formatted_analysis.replace("\n", "<br>").replace("  ", "&nbsp;&nbsp;")
             ai_html = f"""
             <h2>AI Analysis</h2>
             <div class="analysis-card">
-                <p>{formatted_analysis.replace(chr(10), "<br>").replace("  ", "&nbsp;&nbsp;")}</p>
+                <p>{formatted_analysis}</p>
             </div>
             """
 
@@ -118,9 +152,11 @@ class Reporting:
         rows_html = ""
         for pos in report_data["positions"]:
             gain_loss_color = "green" if pos["gain_loss"] >= 0 else "red"
+            # Escape symbol to prevent XSS (user-provided input)
+            safe_symbol = html.escape(str(pos["symbol"]))
             rows_html += f"""
             <tr>
-                <td>{pos["symbol"]}</td>
+                <td>{safe_symbol}</td>
                 <td>{pos["quantity"]:.4f}</td>
                 <td>${pos["purchase_price"]:,.2f}</td>
                 <td>${pos["current_price"]:,.2f}</td>
