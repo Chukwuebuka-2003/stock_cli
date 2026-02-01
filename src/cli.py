@@ -1,9 +1,16 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime
+from dateutil.parser import parse
 
 import click
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import appdirs
+from groq import Groq
 
 from .ai import AIAnalyzer
 from .alerts import PriceAlerts
@@ -20,14 +27,13 @@ from .backtesting import Backtester
 from .technical_indicators import TechnicalIndicators
 from .ml_models import ProphetPredictor
 from .sec_filings import SECFilingsClient
-from groq import Groq
-import appdirs
-import yfinance as yf
-import pandas as pd
-import numpy as np
 
 
 logger = logging.getLogger(__name__)
+
+# Version and contact info
+APP_VERSION = "0.3.0"
+APP_EMAIL = "ebulamicheal@gmail.com"
 
 
 @click.group()
@@ -608,7 +614,7 @@ def backtest(symbol, strategy, period, capital, fast, slow):
         
         # Reset index to make Date a column
         df = df.reset_index()
-        df.rename(columns={'index': 'Date'}, inplace=True)
+        # yfinance history index is named 'Date' by default after reset
         
         # Generate trading signals based on strategy
         if strategy == "sma_crossover":
@@ -620,7 +626,7 @@ def backtest(symbol, strategy, period, capital, fast, slow):
             df['SMA_Slow'] = ti.calculate_sma(df, period=slow)
             
             # Generate signals: 1 = buy, -1 = sell, 0 = hold
-            signals = pd.Series(0, index=range(len(df)))
+            signals = pd.Series(0, index=df.index)
             
             for i in range(1, len(df)):
                 # Buy signal: fast crosses above slow
@@ -717,7 +723,7 @@ def predict(symbol, days, model, period):
         
         # Reset index to make Date a column
         df = df.reset_index()
-        df.rename(columns={'index': 'Date'}, inplace=True)
+        # yfinance history index is named 'Date' by default after reset
         
         click.echo(f"✅ Loaded {len(df)} days of historical data")
         click.echo(f"   Period: {df['Date'].iloc[0].strftime('%Y-%m-%d')} to {df['Date'].iloc[-1].strftime('%Y-%m-%d')}")
@@ -802,7 +808,7 @@ def sec(symbol, filing_type, limit):
         cache_dir = os.path.join(user_data_dir, "sec_cache")
         
         # Initialize SEC client
-        user_agent = "StockTrackerCLI/0.3.0 (ebulamicheal@gmail.com)"
+        user_agent = f"StockTrackerCLI/{APP_VERSION} ({APP_EMAIL})"
         sec_client = SECFilingsClient(
             cache_dir=cache_dir,
             user_agent=user_agent,
@@ -841,7 +847,6 @@ def sec(symbol, filing_type, limit):
                 content = filing['content']
                 if isinstance(content, str):
                     # Remove HTML tags for preview
-                    import re
                     text_content = re.sub(r'<[^>]+>', ' ', content)
                     text_content = ' '.join(text_content.split())[:500]
                     click.echo(f"  Preview:      {text_content}...")
@@ -905,8 +910,7 @@ def compare(benchmark, period):
         if snapshots and len(snapshots) >= 2:
             # Use historical data if available
             # Find snapshots within the period
-            from dateutil.parser import parse
-            from datetime import datetime, timedelta
+            from datetime import timedelta
             
             period_days = {
                 "1m": 30, "3m": 90, "6m": 180, "1y": 365, "2y": 730, "5y": 1825
@@ -1001,9 +1005,9 @@ def compare(benchmark, period):
 
 # Export/Import Commands
 @cli.command()
-@click.option("--format", type=click.Choice(["json", "csv"]), default="json", help="Export format")
+@click.option("--format", "export_format", type=click.Choice(["json", "csv"]), default="json", help="Export format")
 @click.option("--output", help="Output file path (default: portfolio_export.json/csv)")
-def export(format, output):
+def export(export_format, output):
     """Export portfolio data to a file"""
     portfolio = Portfolio()
     positions = portfolio.get_positions()
@@ -1014,10 +1018,10 @@ def export(format, output):
     
     # Set default output filename
     if not output:
-        output = f"portfolio_export.{format}"
+        output = f"portfolio_export.{export_format}"
     
     try:
-        if format == "json":
+        if export_format == "json":
             # Export as JSON
             export_data = {
                 "export_date": datetime.now().isoformat(),
@@ -1027,7 +1031,7 @@ def export(format, output):
             with open(output, 'w') as f:
                 json.dump(export_data, f, indent=2)
             
-        elif format == "csv":
+        elif export_format == "csv":
             # Export as CSV
             df = pd.DataFrame(positions)
             df.to_csv(output, index=False)
