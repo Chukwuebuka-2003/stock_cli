@@ -16,8 +16,15 @@ from .watchlist import Watchlist
 from .agents.orchestrator import AgentOrchestrator
 from .rag.vector_store import VectorStore
 from .rag.embeddings import EmbeddingService
+from .backtesting import Backtester
+from .technical_indicators import TechnicalIndicators
+from .ml_models import ProphetPredictor
+from .sec_filings import SECFilingsClient
 from groq import Groq
 import appdirs
+import yfinance as yf
+import pandas as pd
+import numpy as np
 
 
 logger = logging.getLogger(__name__)
@@ -571,3 +578,530 @@ def watchlist_report():
             click.echo(f"  Note: {stock['note']}")
 
     click.echo("\n" + "=" * 80)
+
+
+# Backtesting Commands
+@cli.command()
+@click.argument("symbol")
+@click.option("--strategy", type=click.Choice(["sma_crossover"]), default="sma_crossover", help="Trading strategy to backtest")
+@click.option("--period", default="2y", help="Historical data period (e.g., 1y, 2y, 5y)")
+@click.option("--capital", type=float, default=100000.0, help="Initial capital for backtesting")
+@click.option("--fast", type=int, default=50, help="Fast moving average period")
+@click.option("--slow", type=int, default=200, help="Slow moving average period")
+def backtest(symbol, strategy, period, capital, fast, slow):
+    """Backtest a trading strategy on historical data"""
+    click.echo(f"\n{'='*80}")
+    click.echo(f"Backtesting {symbol.upper()} - {strategy.upper()} Strategy")
+    click.echo(f"{'='*80}\n")
+    
+    try:
+        # Fetch historical data
+        click.echo(f"Fetching {period} of historical data for {symbol.upper()}...")
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period=period)
+        
+        if df.empty:
+            click.echo(f"❌ No data available for {symbol.upper()}")
+            return
+        
+        click.echo(f"✅ Loaded {len(df)} days of data ({df.index[0].strftime('%Y-%m-%d')} to {df.index[-1].strftime('%Y-%m-%d')})")
+        
+        # Reset index to make Date a column
+        df = df.reset_index()
+        df.rename(columns={'index': 'Date'}, inplace=True)
+        
+        # Generate trading signals based on strategy
+        if strategy == "sma_crossover":
+            click.echo(f"\nGenerating signals using SMA crossover (fast={fast}, slow={slow})...")
+            
+            # Calculate moving averages
+            ti = TechnicalIndicators()
+            df['SMA_Fast'] = ti.calculate_sma(df, period=fast)
+            df['SMA_Slow'] = ti.calculate_sma(df, period=slow)
+            
+            # Generate signals: 1 = buy, -1 = sell, 0 = hold
+            signals = pd.Series(0, index=range(len(df)))
+            
+            for i in range(1, len(df)):
+                # Buy signal: fast crosses above slow
+                if df.iloc[i-1]['SMA_Fast'] <= df.iloc[i-1]['SMA_Slow'] and df.iloc[i]['SMA_Fast'] > df.iloc[i]['SMA_Slow']:
+                    signals.iloc[i] = 1
+                # Sell signal: fast crosses below slow
+                elif df.iloc[i-1]['SMA_Fast'] >= df.iloc[i-1]['SMA_Slow'] and df.iloc[i]['SMA_Fast'] < df.iloc[i]['SMA_Slow']:
+                    signals.iloc[i] = -1
+        
+        # Run backtest
+        click.echo(f"\nRunning backtest with ${capital:,.2f} initial capital...")
+        backtester = Backtester(initial_capital=capital)
+        results = backtester.run_strategy(df, signals)
+        
+        if not results:
+            click.echo("❌ Backtest failed")
+            return
+        
+        # Display results
+        metrics = results['metrics']
+        trades = results['trades']
+        
+        click.echo(f"\n{'='*80}")
+        click.echo("BACKTEST RESULTS")
+        click.echo(f"{'='*80}\n")
+        
+        click.echo(f"Initial Capital:     ${metrics['initial_capital']:,.2f}")
+        click.echo(f"Final Equity:        ${metrics['final_equity']:,.2f}")
+        click.echo(f"Total Return:        ${metrics['total_return']:,.2f} ({metrics['total_return_pct']:+.2f}%)")
+        click.echo(f"\nNumber of Trades:    {metrics['num_trades']}")
+        click.echo(f"  Buy Trades:        {metrics['num_buy_trades']}")
+        click.echo(f"  Sell Trades:       {metrics['num_sell_trades']}")
+        
+        if 'sharpe_ratio' in metrics:
+            click.echo(f"\nSharpe Ratio:        {metrics['sharpe_ratio']:.2f}")
+        if 'sortino_ratio' in metrics:
+            click.echo(f"Sortino Ratio:       {metrics['sortino_ratio']:.2f}")
+        if 'max_drawdown_pct' in metrics:
+            click.echo(f"Max Drawdown:        {metrics['max_drawdown_pct']:.2f}%")
+        if 'win_rate_pct' in metrics:
+            click.echo(f"Win Rate:            {metrics['win_rate_pct']:.2f}%")
+        if 'profit_factor' in metrics:
+            click.echo(f"Profit Factor:       {metrics['profit_factor']:.2f}")
+        
+        # Compare with buy and hold
+        comparison = backtester.compare_with_buy_and_hold(df, results)
+        if comparison:
+            click.echo(f"\n{'='*80}")
+            click.echo("STRATEGY vs BUY & HOLD")
+            click.echo(f"{'='*80}\n")
+            click.echo(f"Buy & Hold Return:   {comparison['buy_and_hold']['return_pct']:+.2f}%")
+            click.echo(f"Strategy Return:     {comparison['strategy']['return_pct']:+.2f}%")
+            click.echo(f"Outperformance:      {comparison['outperformance_pct']:+.2f}%")
+        
+        # Show recent trades
+        if trades:
+            click.echo(f"\n{'='*80}")
+            click.echo(f"RECENT TRADES (Last 10)")
+            click.echo(f"{'='*80}\n")
+            
+            recent_trades = trades[-10:]
+            for trade in recent_trades:
+                date_str = trade['date'].strftime('%Y-%m-%d') if hasattr(trade['date'], 'strftime') else str(trade['date'])
+                click.echo(f"{date_str} - {trade['action']:4s} {trade['shares']:6.0f} shares @ ${trade['price']:8.2f}")
+        
+        click.echo(f"\n{'='*80}\n")
+        
+    except Exception as e:
+        logger.error(f"Backtest error: {e}")
+        click.echo(f"❌ Error running backtest: {e}")
+
+
+# ML Prediction Commands
+@cli.command()
+@click.argument("symbol")
+@click.option("--days", type=int, default=30, help="Number of days to predict")
+@click.option("--model", type=click.Choice(["prophet"]), default="prophet", help="ML model to use")
+@click.option("--period", default="2y", help="Historical data period for training (e.g., 1y, 2y, 5y)")
+def predict(symbol, days, model, period):
+    """Predict future stock prices using machine learning"""
+    click.echo(f"\n{'='*80}")
+    click.echo(f"Stock Price Prediction - {symbol.upper()}")
+    click.echo(f"{'='*80}\n")
+    
+    try:
+        # Fetch historical data
+        click.echo(f"Fetching {period} of historical data for training...")
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period=period)
+        
+        if df.empty:
+            click.echo(f"❌ No data available for {symbol.upper()}")
+            return
+        
+        # Reset index to make Date a column
+        df = df.reset_index()
+        df.rename(columns={'index': 'Date'}, inplace=True)
+        
+        click.echo(f"✅ Loaded {len(df)} days of historical data")
+        click.echo(f"   Period: {df['Date'].iloc[0].strftime('%Y-%m-%d')} to {df['Date'].iloc[-1].strftime('%Y-%m-%d')}")
+        click.echo(f"   Latest Close: ${df['Close'].iloc[-1]:.2f}")
+        
+        # Train model and make predictions
+        if model == "prophet":
+            click.echo(f"\nTraining Prophet model (this may take a moment)...")
+            predictor = ProphetPredictor()
+            predictor.train(df, symbol)
+            
+            click.echo(f"Generating {days}-day forecast...")
+            predictions = predictor.predict(periods=days)
+            
+            if predictions.empty:
+                click.echo("❌ Prediction failed")
+                return
+            
+            # Display predictions
+            click.echo(f"\n{'='*80}")
+            click.echo(f"PRICE PREDICTIONS - Next {days} Days")
+            click.echo(f"{'='*80}\n")
+            
+            click.echo(f"{'Date':<12} {'Predicted':<12} {'Lower Bound':<12} {'Upper Bound':<12}")
+            click.echo("-" * 80)
+            
+            for _, row in predictions.iterrows():
+                date_str = row['Date'].strftime('%Y-%m-%d')
+                click.echo(
+                    f"{date_str:<12} "
+                    f"${row['Predicted_Price']:<11.2f} "
+                    f"${row['Lower_Bound']:<11.2f} "
+                    f"${row['Upper_Bound']:<11.2f}"
+                )
+            
+            # Calculate predicted change
+            current_price = df['Close'].iloc[-1]
+            final_prediction = predictions['Predicted_Price'].iloc[-1]
+            price_change = final_prediction - current_price
+            pct_change = (price_change / current_price) * 100
+            
+            click.echo(f"\n{'='*80}")
+            click.echo("FORECAST SUMMARY")
+            click.echo(f"{'='*80}\n")
+            click.echo(f"Current Price:       ${current_price:.2f}")
+            click.echo(f"Predicted Price:     ${final_prediction:.2f} (in {days} days)")
+            click.echo(f"Expected Change:     ${price_change:+.2f} ({pct_change:+.2f}%)")
+            
+            # Determine trend
+            if pct_change > 2:
+                trend = "📈 BULLISH"
+            elif pct_change < -2:
+                trend = "📉 BEARISH"
+            else:
+                trend = "➡️  NEUTRAL"
+            
+            click.echo(f"Trend:               {trend}")
+            click.echo(f"\n{'='*80}\n")
+            
+            click.echo("⚠️  Disclaimer: Predictions are for informational purposes only.")
+            click.echo("    Past performance does not guarantee future results.\n")
+        
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        click.echo(f"❌ Error making predictions: {e}")
+
+
+# SEC Filings Command
+@cli.command()
+@click.argument("symbol")
+@click.option("--filing-type", type=click.Choice(["10-K", "10-Q", "8-K", "all"]), default="all", help="Type of SEC filing")
+@click.option("--limit", type=int, default=5, help="Number of filings to fetch")
+def sec(symbol, filing_type, limit):
+    """View recent SEC filings for a stock"""
+    click.echo(f"\n{'='*80}")
+    click.echo(f"SEC Filings - {symbol.upper()}")
+    click.echo(f"{'='*80}\n")
+    
+    try:
+        # Get user data directory for caching
+        user_data_dir = appdirs.user_data_dir("StockTrackerCLI", "Chukwuebuka")
+        cache_dir = os.path.join(user_data_dir, "sec_cache")
+        
+        # Initialize SEC client
+        user_agent = "StockTrackerCLI/0.3.0 (ebulamicheal@gmail.com)"
+        sec_client = SECFilingsClient(
+            cache_dir=cache_dir,
+            user_agent=user_agent,
+            cache_ttl_days=7
+        )
+        
+        # Fetch filings
+        form_type = None if filing_type == "all" else filing_type
+        click.echo(f"Fetching {filing_type} filings for {symbol.upper()}...")
+        
+        filings = sec_client.fetch_filings(symbol, form_type=form_type, limit=limit)
+        
+        if not filings:
+            click.echo(f"❌ No {filing_type} filings found for {symbol.upper()}")
+            click.echo("\nNote: Make sure the symbol is correct and the company files with the SEC.")
+            return
+        
+        click.echo(f"✅ Found {len(filings)} filing(s)\n")
+        
+        # Display filings
+        click.echo(f"{'='*80}")
+        click.echo(f"RECENT FILINGS")
+        click.echo(f"{'='*80}\n")
+        
+        for i, filing in enumerate(filings, 1):
+            click.echo(f"Filing #{i}")
+            click.echo(f"  Type:         {filing.get('form_type', 'N/A')}")
+            click.echo(f"  Filing Date:  {filing.get('filing_date', 'N/A')}")
+            if filing.get('report_date'):
+                click.echo(f"  Report Date:  {filing['report_date']}")
+            click.echo(f"  URL:          {filing.get('document_url', 'N/A')}")
+            
+            # Show content preview if available
+            if filing.get('content'):
+                # Get first 500 chars of text content
+                content = filing['content']
+                if isinstance(content, str):
+                    # Remove HTML tags for preview
+                    import re
+                    text_content = re.sub(r'<[^>]+>', ' ', content)
+                    text_content = ' '.join(text_content.split())[:500]
+                    click.echo(f"  Preview:      {text_content}...")
+            
+            click.echo("")
+        
+        click.echo(f"{'='*80}\n")
+        click.echo("💡 Tip: Visit the URLs above to view full filings on SEC.gov")
+        
+    except ValueError as e:
+        click.echo(f"❌ Error: {e}")
+    except Exception as e:
+        logger.error(f"SEC filings error: {e}")
+        click.echo(f"❌ Error fetching SEC filings: {e}")
+
+
+# Portfolio Comparison Command
+@cli.command()
+@click.option("--benchmark", default="^GSPC", help="Benchmark symbol (default: ^GSPC for S&P 500)")
+@click.option("--period", default="1y", help="Comparison period (e.g., 1m, 3m, 6m, 1y, 2y)")
+def compare(benchmark, period):
+    """Compare portfolio performance against a benchmark"""
+    config = Config()
+    api_key = config.get("alpha_vantage_api_key")
+    if not api_key:
+        click.echo("Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first.")
+        return
+    
+    portfolio = Portfolio()
+    positions = portfolio.get_positions()
+    
+    if not positions:
+        click.echo("Your portfolio is empty. Add some positions first.")
+        return
+    
+    click.echo(f"\n{'='*80}")
+    click.echo(f"Portfolio Comparison vs {benchmark}")
+    click.echo(f"{'='*80}\n")
+    
+    try:
+        # Fetch benchmark data
+        click.echo(f"Fetching {period} benchmark data...")
+        benchmark_ticker = yf.Ticker(benchmark)
+        benchmark_df = benchmark_ticker.history(period=period)
+        
+        if benchmark_df.empty:
+            click.echo(f"❌ Could not fetch data for benchmark {benchmark}")
+            return
+        
+        benchmark_start = benchmark_df['Close'].iloc[0]
+        benchmark_end = benchmark_df['Close'].iloc[-1]
+        benchmark_return = ((benchmark_end - benchmark_start) / benchmark_start) * 100
+        
+        # Calculate portfolio returns
+        data_fetcher = DataFetcher(api_key=api_key)
+        portfolio_history = PortfolioHistory()
+        
+        # Try to get historical snapshots
+        snapshots = portfolio_history.history
+        
+        if snapshots and len(snapshots) >= 2:
+            # Use historical data if available
+            # Find snapshots within the period
+            from dateutil.parser import parse
+            from datetime import datetime, timedelta
+            
+            period_days = {
+                "1m": 30, "3m": 90, "6m": 180, "1y": 365, "2y": 730, "5y": 1825
+            }
+            days = period_days.get(period, 365)
+            cutoff_date = datetime.now() - timedelta(days=days)
+            
+            recent_snapshots = [s for s in snapshots if parse(s['date']) >= cutoff_date]
+            
+            if len(recent_snapshots) >= 2:
+                recent_snapshots.sort(key=lambda x: x['date'])
+                start_snapshot = recent_snapshots[0]
+                end_snapshot = recent_snapshots[-1]
+                
+                portfolio_start = start_snapshot['total_value']
+                portfolio_end = end_snapshot['total_value']
+                portfolio_return = ((portfolio_end - portfolio_start) / portfolio_start) * 100
+            else:
+                click.echo("⚠️  Not enough historical data for accurate comparison.")
+                click.echo("    Using current portfolio value estimate.\n")
+                
+                # Estimate using current prices
+                total_value = 0
+                total_cost = 0
+                for position in positions:
+                    stock_data = data_fetcher.get_stock_data(position['symbol'])
+                    if stock_data:
+                        value = position['quantity'] * stock_data['currentPrice']
+                        cost = position['quantity'] * position['purchase_price']
+                        total_value += value
+                        total_cost += cost
+                
+                portfolio_return = ((total_value - total_cost) / total_cost) * 100 if total_cost > 0 else 0
+        else:
+            click.echo("⚠️  No historical snapshots found. Using current portfolio value.\n")
+            
+            # Calculate based on current prices
+            total_value = 0
+            total_cost = 0
+            for position in positions:
+                stock_data = data_fetcher.get_stock_data(position['symbol'])
+                if stock_data:
+                    value = position['quantity'] * stock_data['currentPrice']
+                    cost = position['quantity'] * position['purchase_price']
+                    total_value += value
+                    total_cost += cost
+            
+            portfolio_return = ((total_value - total_cost) / total_cost) * 100 if total_cost > 0 else 0
+        
+        # Display comparison
+        click.echo(f"{'='*80}")
+        click.echo(f"PERFORMANCE COMPARISON - {period.upper()}")
+        click.echo(f"{'='*80}\n")
+        
+        click.echo(f"Portfolio Return:    {portfolio_return:+.2f}%")
+        click.echo(f"Benchmark Return:    {benchmark_return:+.2f}% ({benchmark})")
+        
+        alpha = portfolio_return - benchmark_return
+        click.echo(f"\nAlpha:               {alpha:+.2f}%")
+        
+        if alpha > 0:
+            click.echo(f"Performance:         📈 Outperforming benchmark")
+        elif alpha < 0:
+            click.echo(f"Performance:         📉 Underperforming benchmark")
+        else:
+            click.echo(f"Performance:         ➡️  Matching benchmark")
+        
+        # Calculate additional metrics if historical data available
+        if snapshots and len(snapshots) >= 10:
+            # Calculate volatility
+            returns = []
+            for i in range(1, len(snapshots)):
+                prev_val = snapshots[i-1]['total_value']
+                curr_val = snapshots[i]['total_value']
+                ret = (curr_val - prev_val) / prev_val
+                returns.append(ret)
+            
+            if returns:
+                volatility = np.std(returns) * np.sqrt(252) * 100  # Annualized
+                sharpe = (np.mean(returns) * 252) / (np.std(returns) * np.sqrt(252)) if np.std(returns) > 0 else 0
+                
+                click.echo(f"\nAnnualized Volatility: {volatility:.2f}%")
+                click.echo(f"Sharpe Ratio:         {sharpe:.2f}")
+        
+        click.echo(f"\n{'='*80}\n")
+        click.echo("💡 Tip: Run 'stock-tracker history snapshot' regularly for better tracking")
+        
+    except Exception as e:
+        logger.error(f"Comparison error: {e}")
+        click.echo(f"❌ Error comparing portfolio: {e}")
+
+
+# Export/Import Commands
+@cli.command()
+@click.option("--format", type=click.Choice(["json", "csv"]), default="json", help="Export format")
+@click.option("--output", help="Output file path (default: portfolio_export.json/csv)")
+def export(format, output):
+    """Export portfolio data to a file"""
+    portfolio = Portfolio()
+    positions = portfolio.get_positions()
+    
+    if not positions:
+        click.echo("Your portfolio is empty. Nothing to export.")
+        return
+    
+    # Set default output filename
+    if not output:
+        output = f"portfolio_export.{format}"
+    
+    try:
+        if format == "json":
+            # Export as JSON
+            export_data = {
+                "export_date": datetime.now().isoformat(),
+                "positions": positions
+            }
+            
+            with open(output, 'w') as f:
+                json.dump(export_data, f, indent=2)
+            
+        elif format == "csv":
+            # Export as CSV
+            df = pd.DataFrame(positions)
+            df.to_csv(output, index=False)
+        
+        click.echo(f"✅ Portfolio exported to {output}")
+        click.echo(f"   {len(positions)} position(s) exported")
+        
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        click.echo(f"❌ Error exporting portfolio: {e}")
+
+
+@cli.command()
+@click.argument("file")
+@click.option("--replace", is_flag=True, help="Replace existing portfolio (default: merge)")
+def import_portfolio(file, replace):
+    """Import portfolio data from a file"""
+    if not os.path.exists(file):
+        click.echo(f"❌ File not found: {file}")
+        return
+    
+    try:
+        portfolio = Portfolio()
+        
+        # Determine format from file extension
+        file_ext = os.path.splitext(file)[1].lower()
+        
+        if file_ext == ".json":
+            with open(file, 'r') as f:
+                data = json.load(f)
+                
+            # Handle both old and new export formats
+            if isinstance(data, dict) and 'positions' in data:
+                positions_to_import = data['positions']
+            elif isinstance(data, list):
+                positions_to_import = data
+            else:
+                click.echo("❌ Invalid JSON format")
+                return
+                
+        elif file_ext == ".csv":
+            df = pd.read_csv(file)
+            positions_to_import = df.to_dict('records')
+        else:
+            click.echo(f"❌ Unsupported file format: {file_ext}")
+            click.echo("    Supported formats: .json, .csv")
+            return
+        
+        # Clear portfolio if replace flag is set
+        if replace:
+            current_positions = portfolio.get_positions()
+            for pos in current_positions:
+                portfolio.remove_position(pos['symbol'])
+            click.echo(f"Cleared {len(current_positions)} existing position(s)")
+        
+        # Import positions
+        imported = 0
+        for pos in positions_to_import:
+            try:
+                portfolio.add_position(
+                    symbol=pos['symbol'],
+                    quantity=float(pos['quantity']),
+                    purchase_price=float(pos['purchase_price'])
+                )
+                imported += 1
+            except Exception as e:
+                click.echo(f"⚠️  Failed to import {pos.get('symbol', 'unknown')}: {e}")
+        
+        mode = "replaced" if replace else "merged"
+        click.echo(f"✅ Portfolio {mode} successfully")
+        click.echo(f"   {imported} position(s) imported")
+        
+    except json.JSONDecodeError:
+        click.echo("❌ Invalid JSON file")
+    except Exception as e:
+        logger.error(f"Import error: {e}")
+        click.echo(f"❌ Error importing portfolio: {e}")
