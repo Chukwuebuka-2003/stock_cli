@@ -25,6 +25,13 @@ A command-line tool to track your stock portfolio and get AI-powered investment 
 - 🔔 **Price Alerts**: Set price alerts for stocks with customizable above/below thresholds
 - 👀 **Watchlist**: Track stocks you're interested in without adding them to your portfolio
 
+### 🆕 Advanced Trading Features
+- 📉 **Backtesting**: Test trading strategies on historical data with detailed performance metrics
+- 🔮 **ML Price Predictions**: Forecast future stock prices using Prophet machine learning model
+- 📄 **SEC Filings**: Access and view recent SEC filings (10-K, 10-Q, 8-K) for any stock
+- 📊 **Portfolio Comparison**: Compare your portfolio performance against market benchmarks (S&P 500, NASDAQ, etc.)
+- 💾 **Export/Import**: Backup and restore your portfolio in JSON or CSV format
+
 ### 🆕 Interactive Dashboard (Streamlit UI)
 - 📊 **Real-time Portfolio Dashboard**: Visual overview of your entire portfolio with interactive charts
 - 📈 **Advanced Price Charts**: Candlestick charts with technical indicators (RSI, MACD, Bollinger Bands, Moving Averages)
@@ -185,6 +192,91 @@ stock-tracker watchlist report
 
 # Remove a stock from watchlist
 stock-tracker watchlist remove NVDA
+```
+
+### 🆕 Backtesting
+
+```bash
+# Backtest a trading strategy on historical data
+stock-tracker backtest AAPL --period 2y           # Default SMA crossover strategy
+stock-tracker backtest MSFT --capital 50000       # Custom initial capital
+stock-tracker backtest GOOGL --fast 20 --slow 50  # Custom MA periods
+
+# Strategy options:
+# - sma_crossover: Simple Moving Average crossover (fast MA crosses slow MA)
+
+# Results include:
+# - Total return and Sharpe ratio
+# - Maximum drawdown and win rate
+# - Comparison with buy-and-hold strategy
+# - Trade history
+```
+
+### 🆕 Price Predictions
+
+```bash
+# Predict future stock prices using machine learning
+stock-tracker predict AAPL               # 30-day forecast (default)
+stock-tracker predict TSLA --days 60     # 60-day forecast
+stock-tracker predict NVDA --period 5y   # Train on 5 years of data
+
+# Models available:
+# - prophet: Facebook Prophet time series forecasting (default)
+
+# Shows:
+# - Predicted prices with confidence intervals (upper/lower bounds)
+# - Expected price change and percentage
+# - Trend analysis (bullish/bearish/neutral)
+```
+
+### 🆕 SEC Filings
+
+```bash
+# View recent SEC filings for a stock
+stock-tracker sec AAPL                    # All recent filings
+stock-tracker sec MSFT --filing-type 10-K # Annual reports only
+stock-tracker sec TSLA --filing-type 10-Q # Quarterly reports
+stock-tracker sec GOOGL --filing-type 8-K # Current event reports
+stock-tracker sec NVDA --limit 10         # Get more filings
+
+# Shows:
+# - Filing type, date, and report date
+# - Direct links to SEC.gov documents
+# - Content preview
+```
+
+### 🆕 Portfolio Analysis
+
+```bash
+# Compare portfolio performance against benchmarks
+stock-tracker compare                         # Compare vs S&P 500 (default)
+stock-tracker compare --benchmark ^DJI        # Compare vs Dow Jones
+stock-tracker compare --benchmark ^IXIC       # Compare vs NASDAQ
+stock-tracker compare --period 6m             # 6-month comparison
+
+# Shows:
+# - Portfolio return vs benchmark return
+# - Alpha (outperformance/underperformance)
+# - Volatility and Sharpe ratio (if historical data available)
+```
+
+### 🆕 Portfolio Export/Import
+
+```bash
+# Export portfolio to file
+stock-tracker export                          # Export to portfolio_export.json
+stock-tracker export --format csv             # Export to CSV
+stock-tracker export --output backup.json     # Custom output path
+
+# Import portfolio from file
+stock-tracker import-portfolio backup.json    # Merge with existing portfolio
+stock-tracker import-portfolio data.csv --replace  # Replace entire portfolio
+
+# Use cases:
+# - Backup your portfolio
+# - Share portfolio with others
+# - Migrate between devices
+# - Bulk import positions
 ```
 
 ## 🆕 Interactive Dashboard (Streamlit UI)
