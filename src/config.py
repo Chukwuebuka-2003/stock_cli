@@ -131,7 +131,7 @@ class Config:
             # LLM Provider Configuration
             "llm_provider": "groq",  # Options: "groq" or "docker"
             "groq_model": "openai/gpt-oss-120b",
-            "docker_model_runner_url": "http://localhost:12434/engines/v1",
+            "docker_model_runner_url": "http://localhost:12434/v1",
             "docker_model_runner_model": "ai/qwen2.5:latestQ4_0",
         }
         self.save_config(default_config)

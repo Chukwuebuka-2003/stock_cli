@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Default configurations
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_DOCKER_MODEL = "ai/qwen2.5:latestQ4_0"
-DEFAULT_DOCKER_URL = "http://localhost:12434/engines/v1"
+DEFAULT_DOCKER_URL = "http://localhost:12434/v1"
 
 
 class LLMClientWrapper:
