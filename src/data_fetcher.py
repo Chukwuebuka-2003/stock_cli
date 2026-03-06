@@ -32,7 +32,7 @@ class DataFetcher:
         
         if not self.td_client:
             # Check if key is in env as fallback
-            key = os.getenv("TWELVE_DATA_API_KEY")
+            key = os.getenv("TWELVE_DATA_API_KEY") or os.getenv("TWELVEDATA_API_KEY")
             if key:
                 self.td_client = TDClient(apikey=key)
                 logger.info("Initialized Twelve Data client from env")

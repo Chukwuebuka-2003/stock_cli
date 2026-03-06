@@ -16,7 +16,7 @@ from .watchlist import Watchlist
 from .agents.orchestrator import AgentOrchestrator
 from .rag.vector_store import VectorStore
 from .rag.embeddings import EmbeddingService
-from groq import Groq
+from .llm_client import create_llm_client
 import appdirs
 
 
@@ -57,15 +57,15 @@ def remove(symbol):
 def report():
     """Generate and display a report of your portfolio"""
     config = Config()
-    api_key = config.get("alpha_vantage_api_key")
+    api_key = config.get("twelvedata_api_key")
     if not api_key:
         click.echo(
-            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+            "Twelve Data API key not set. Please run 'setup-twelvedata' first."
         )
         return
 
     portfolio = Portfolio()
-    data_fetcher = DataFetcher(api_key=api_key)
+    data_fetcher = DataFetcher(twelvedata_api_key=api_key)
     reporting = Reporting(config)
 
     # Generate and print the plain text report for the console
@@ -85,10 +85,10 @@ def report():
 def ai_report(email, events):
     """Generate an AI-powered analysis of your portfolio"""
     config = Config()
-    alpha_vantage_key = config.get("alpha_vantage_api_key")
-    if not alpha_vantage_key:
+    twelvedata_key = config.get("twelvedata_api_key")
+    if not twelvedata_key:
         click.echo(
-            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+            "Twelve Data API key not set. Please run 'setup-twelvedata' first."
         )
         return
 
@@ -98,7 +98,7 @@ def ai_report(email, events):
         return
 
     portfolio = Portfolio()
-    data_fetcher = DataFetcher(api_key=alpha_vantage_key)
+    data_fetcher = DataFetcher(twelvedata_api_key=twelvedata_key)
     reporting = Reporting(config)
 
     # Parse events from command-line argument or environment variable
@@ -184,7 +184,16 @@ def chat(query):
     user_data_dir = appdirs.user_data_dir("StockTrackerCLI", "Chukwuebuka")
     rag_dir = os.path.join(user_data_dir, "rag_storage")
     embedding_service = EmbeddingService()
-    vector_store = VectorStore(persist_directory=rag_dir, embedding_service=embedding_service)
+    
+    chroma_host = config.get("chroma_host")
+    chroma_port = config.get("chroma_port")
+    
+    vector_store = VectorStore(
+        persist_directory=rag_dir, 
+        embedding_service=embedding_service,
+        host=chroma_host,
+        port=chroma_port
+    )
     
     orchestrator = AgentOrchestrator(
         model_client=groq_client,
@@ -211,12 +220,12 @@ def setup_ai():
 
 
 @cli.command()
-def setup_alpha_vantage():
-    """Set up your Alpha Vantage API key"""
+def setup_twelvedata():
+    """Set up your Twelve Data API key"""
     config = Config()
-    api_key = click.prompt("Enter your Alpha Vantage API key", hide_input=True)
-    config.set("alpha_vantage_api_key", api_key)
-    click.echo("Alpha Vantage API key saved.")
+    api_key = click.prompt("Enter your Twelve Data API key", hide_input=True)
+    config.set("twelvedata_api_key", api_key)
+    click.echo("Twelve Data API key saved.")
 
 
 @cli.command()
@@ -297,10 +306,10 @@ def history():
 def history_snapshot():
     """Take a snapshot of your current portfolio for historical tracking"""
     config = Config()
-    api_key = config.get("alpha_vantage_api_key")
+    api_key = config.get("twelvedata_api_key")
     if not api_key:
         click.echo(
-            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+            "Twelve Data API key not set. Please run 'setup-twelvedata' first."
         )
         return
 
@@ -309,7 +318,7 @@ def history_snapshot():
         click.echo("Your portfolio is empty. Add some positions first.")
         return
 
-    data_fetcher = DataFetcher(api_key=api_key)
+    data_fetcher = DataFetcher(twelvedata_api_key=api_key)
     portfolio_history = PortfolioHistory()
 
     click.echo("Taking portfolio snapshot...")
@@ -445,10 +454,10 @@ def alert_remove(alert_id):
 def alert_check():
     """Check all active alerts against current prices"""
     config = Config()
-    api_key = config.get("alpha_vantage_api_key")
+    api_key = config.get("twelvedata_api_key")
     if not api_key:
         click.echo(
-            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+            "Twelve Data API key not set. Please run 'setup-twelvedata' first."
         )
         return
 
@@ -461,7 +470,7 @@ def alert_check():
 
     click.echo(f"Checking {len(active_alerts)} active alert(s)...")
 
-    data_fetcher = DataFetcher(api_key=api_key)
+    data_fetcher = DataFetcher(twelvedata_api_key=api_key)
 
     if triggered := alerts.check_alerts(data_fetcher):
         click.echo(f"\n🚨 {len(triggered)} alert(s) triggered!")
@@ -537,10 +546,10 @@ def watchlist_list():
 def watchlist_report():
     """Generate a detailed report for your watchlist"""
     config = Config()
-    api_key = config.get("alpha_vantage_api_key")
+    api_key = config.get("twelvedata_api_key")
     if not api_key:
         click.echo(
-            "Alpha Vantage API key not set. Please run 'setup-alpha-vantage' first."
+            "Twelve Data API key not set. Please run 'setup-twelvedata' first."
         )
         return
 
@@ -551,7 +560,7 @@ def watchlist_report():
         click.echo("Your watchlist is empty.")
         return
 
-    data_fetcher = DataFetcher(api_key=api_key)
+    data_fetcher = DataFetcher(twelvedata_api_key=api_key)
 
     click.echo(f"\nWatchlist Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     click.echo("=" * 80)

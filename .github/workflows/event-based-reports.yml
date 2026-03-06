@@ -18,6 +18,16 @@ jobs:
   check-events:
     runs-on: ubuntu-latest
 
+    services:
+      chroma:
+        image: chromadb/chroma:latest
+        ports:
+          - 8000:8000
+      model-runner:
+        image: ai/granite-4.0-micro:latest
+        ports:
+          - 12434:12434
+
     outputs:
       should_generate_report: ${{ steps.check-events.outputs.should_report }}
       events_summary: ${{ steps.check-events.outputs.summary }}
@@ -44,6 +54,8 @@ jobs:
         env:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+          CHROMA_HOST: localhost
+          CHROMA_PORT: 8000
         run: |
           python << 'EOF'
           import json
@@ -121,6 +133,16 @@ jobs:
     if: needs.check-events.outputs.should_generate_report == 'true' || github.event.inputs.force_report == 'true'
     runs-on: ubuntu-latest
 
+    services:
+      chroma:
+        image: chromadb/chroma:latest
+        ports:
+          - 8000:8000
+      model-runner:
+        image: ai/granite-4.0-micro:latest
+        ports:
+          - 12434:12434
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -139,9 +161,14 @@ jobs:
 
       - name: Generate event-triggered AI report
         env:
-          # API Keys
+          # AI/LLM Configuration
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'groq' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          
+          # Local Model Runner Config (used if LLM_PROVIDER is 'docker')
+          DOCKER_MODEL_RUNNER_URL: http://localhost:12434/v1
+          DOCKER_MODEL_RUNNER_MODEL: ai/granite-4.0-micro:latest
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
 
           # Email Configuration
@@ -153,6 +180,10 @@ jobs:
 
           # Portfolio Data
           PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+
+          # Chroma Configuration (using service container)
+          CHROMA_HOST: localhost
+          CHROMA_PORT: 8000
 
           # Market Events Data (passed via environment variable to avoid shell escaping issues)
           MARKET_EVENTS_JSON: ${{ needs.check-events.outputs.events_json }}

@@ -60,3 +60,4 @@ Thumbs.db
 
 # Application data (user-specific, should not be in repo)
 *.log
+.env

@@ -14,8 +14,8 @@ A command-line tool to track your stock portfolio and get AI-powered investment 
 
 ### Core Features
 - 📊 **Portfolio Management**: Add and remove stock positions with purchase prices
-- 💹 **Real-time Data**: Fetch current stock prices using Alpha Vantage API
-- 🤖 **AI Analysis**: Get intelligent insights using Groq's LLM (llama-3.3-70b-versatile)
+- 💹 **Real-time Data**: Fetch current stock prices using Twelve Data API
+- 🤖 **AI Analysis**: Get intelligent insights using Groq's LLM (openai/gpt-oss-120b)
 - 📧 **Email Reports**: Send HTML-formatted reports with AI analysis via email
 - ⚡ **Smart Caching**: 15-minute cache to reduce API calls
 - 🐳 **Docker Support**: Containerized deployment with automated scheduled reports
@@ -66,8 +66,8 @@ pip install -e .
 # Setup Groq API key for AI analysis
 stock-tracker setup-ai
 
-# Setup Alpha Vantage API key for stock data
-stock-tracker setup-alpha-vantage
+# Setup Twelve Data API key for stock data
+stock-tracker setup-twelvedata
 
 # Setup email settings (optional, for email reports)
 stock-tracker setup-email
@@ -75,7 +75,7 @@ stock-tracker setup-email
 
 **Get Free API Keys:**
 - Groq: https://console.groq.com/
-- Alpha Vantage: https://www.alphavantage.co/support/#api-key
+- Twelve Data: https://twelvedata.com/
 
 ### 2. Add Stock Positions
 
@@ -129,8 +129,8 @@ stock-tracker ai-report [--email EMAIL]
 # Configure Groq API key
 stock-tracker setup-ai
 
-# Configure Alpha Vantage API key
-stock-tracker setup-alpha-vantage
+# Configure Twelve Data API key
+stock-tracker setup-twelvedata
 
 # Configure email settings
 stock-tracker setup-email
@@ -278,7 +278,7 @@ Total Gain/Loss: +$1,161.00 (+10.2%)
 1. **Configure GitHub Secrets** (Settings → Secrets → Actions):
    ```
    GROQ_API_KEY
-   ALPHA_VANTAGE_API_KEY
+   TWELVEDATA_API_KEY
    TAVILY_API_KEY
    EMAIL_SMTP_SERVER
    EMAIL_SMTP_PORT
@@ -325,7 +325,7 @@ docker run --rm stock-tracker:latest report
 # Run AI report with email
 docker run --rm \
   -e GROQ_API_KEY="your_key" \
-  -e ALPHA_VANTAGE_API_KEY="your_key" \
+  -e TWELVEDATA_API_KEY="your_key" \
   -e EMAIL_ADDRESS="your@gmail.com" \
   -e EMAIL_PASSWORD="app_password" \
   -e EMAIL_RECIPIENT="recipient@example.com" \
@@ -339,7 +339,7 @@ Create a `.env` file:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
-ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+TWELVEDATA_API_KEY=your_twelvedata_key
 TAVILY_API_KEY=your_tavily_api_key
 EMAIL_SMTP_SERVER=smtp.gmail.com
 EMAIL_SMTP_PORT=587
@@ -372,7 +372,7 @@ The CLI stores data in platform-specific directories:
 - Internet connection for API access
 - API keys:
   - Groq API (for AI analysis)
-  - Alpha Vantage API (for stock data)
+  - Twelve Data API (for stock data)
 - SMTP server access (optional, for email reports)
 
 ## Dependencies
@@ -381,7 +381,7 @@ The CLI stores data in platform-specific directories:
 - click - CLI framework
 - pandas - Data manipulation
 - groq - AI inference
-- alpha-vantage - Stock data API
+- twelvedata - Stock data API
 - yfinance - Historical stock data
 - tavily-python - Market event detection and news search
 - python-dateutil - Date utilities

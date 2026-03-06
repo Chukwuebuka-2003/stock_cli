@@ -137,8 +137,8 @@ def get_data_fetcher():
     twelvedata_key = config.get("twelvedata_api_key")
     
     if not twelvedata_key:
-        st.error("⚠️ Twelve Data API key not configured. Please add TWELVE_DATA_API_KEY to your .env file.")
-        st.stop()
+        # Don't st.stop() here, let the UI handle it so we can see diagnostics
+        return None
     
     st.success("✅ Using Twelve Data API (800 calls/day)")
     
@@ -150,6 +150,8 @@ def get_data_fetcher():
 def get_historical_data(symbol: str, period: str = "1y") -> Optional[pd.DataFrame]:
     """Fetch and cache historical data for a symbol."""
     fetcher = get_data_fetcher()
+    if not fetcher:
+        return None
     return fetcher.get_historical_data(symbol, period=period)
 
 
@@ -157,6 +159,8 @@ def get_historical_data(symbol: str, period: str = "1y") -> Optional[pd.DataFram
 def get_stock_quote(symbol: str) -> Optional[dict]:
     """Fetch and cache current stock quote."""
     fetcher = get_data_fetcher()
+    if not fetcher:
+        return None
     return fetcher.get_stock_data(symbol)
 
 
@@ -176,7 +180,17 @@ def get_vector_store() -> VectorStore:
         st.stop()
 
     embedding_service = get_embedding_service()
-    return VectorStore(persist_directory=rag_dir, embedding_service=embedding_service)
+    
+    config = get_config_manager()
+    chroma_host = config.get("chroma_host")
+    chroma_port = config.get("chroma_port")
+    
+    return VectorStore(
+        persist_directory=rag_dir, 
+        embedding_service=embedding_service,
+        host=chroma_host,
+        port=chroma_port
+    )
 
 
 @st.cache_resource
@@ -625,8 +639,14 @@ def create_performance_chart(portfolio_data: List[dict]) -> go.Figure:
 
 
 def display_portfolio_overview():
-    """Display portfolio overview tab."""
+    """Display the portfolio overview section."""
     st.header("📊 Portfolio Overview")
+    
+    fetcher = get_data_fetcher()
+    if not fetcher:
+        st.error("⚠️ Twelve Data API key not configured. Please add TWELVEDATA_API_KEY to your .env file.")
+        st.info("💡 See the **System Diagnostics** in the sidebar for more details.")
+        return
 
     try:
         portfolio = PortfolioManager(POSITIONS_PATH)
@@ -1931,7 +1951,7 @@ def display_sec_filings():
         with st.spinner("Generating analysis..."):
             try:
                 completion = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="openai/gpt-oss-120b",
                     temperature=0.2,
                     messages=[
                         {
@@ -2072,10 +2092,29 @@ def main():
         stock-tracker report
 
         # Setup APIs
-        stock-tracker setup-alpha-vantage
+        stock-tracker setup-twelvedata
         stock-tracker setup-ai
         ```
         """)
+
+        # System Diagnostics in Sidebar
+        st.markdown("---")
+        if st.checkbox("🔍 Show System Diagnostics"):
+            st.write("### 🛠 Diagnostics")
+            config_mgr = get_config_manager()
+            st.write("**Twelve Data Key (Config):**", "✅ Found" if config_mgr.get("twelvedata_api_key") else "❌ Missing")
+            
+            # Find any environment variables related to Twelve Data
+            twelve_env = [k for k in os.environ.keys() if "TWELVE" in k.upper()]
+            st.write("**Env Vars (Twelve):**", twelve_env)
+            for k in twelve_env:
+                st.write(f"- {k}: {'✅ Set' if os.environ.get(k) else '❌ Empty'}")
+            
+            st.write("**Tavily Key:**", "✅ Set" if os.environ.get("TAVILY_API_KEY") else "❌ Missing")
+            st.write("**Groq Key:**", "✅ Set" if os.environ.get("GROQ_API_KEY") else "❌ Missing")
+            st.write("**CWD:**", os.getcwd())
+
+        st.info("💡 Tip: Use `stock-tracker setup-twelvedata` in your terminal to save the key persistently.")
 
         st.markdown("---")
 
