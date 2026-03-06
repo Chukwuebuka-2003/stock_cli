@@ -5,8 +5,13 @@ from dotenv import load_dotenv
 
 from stock_cli.file_paths import CONFIG_PATH
 
-# Load .env file
-load_dotenv()
+# Load .env file with explicit path resolution
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_path = os.path.join(project_root, ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path, override=True)
+else:
+    load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +47,48 @@ class Config:
             config = self.create_default_config()
 
         # Override with environment variables if present
-        if os.getenv("TWELVE_DATA_API_KEY"):
-            config["twelvedata_api_key"] = os.getenv("TWELVE_DATA_API_KEY")
-            logger.info("Using TWELVE_DATA_API_KEY from environment variable")
+        twelve_key1 = os.getenv("TWELVE_DATA_API_KEY")
+        twelve_key2 = os.getenv("TWELVEDATA_API_KEY")
+        
+        if twelve_key1:
+            config["twelvedata_api_key"] = twelve_key1
+            logger.info("Applied TWELVE_DATA_API_KEY from environment")
+        elif twelve_key2:
+            config["twelvedata_api_key"] = twelve_key2
+            logger.info("Applied TWELVEDATA_API_KEY from environment")
+
+        if os.getenv("GROQ_API_KEY"):
+            config["groq_api_key"] = os.getenv("GROQ_API_KEY")
+            logger.info("Using GROQ_API_KEY from environment variable")
+
+        # LLM Provider Configuration
+        if os.getenv("LLM_PROVIDER"):
+            config["llm_provider"] = os.getenv("LLM_PROVIDER")
+            logger.info(f"Using LLM_PROVIDER from environment: {config['llm_provider']}")
+
+        if os.getenv("GROQ_MODEL"):
+            config["groq_model"] = os.getenv("GROQ_MODEL")
+            logger.info(f"Using GROQ_MODEL from environment: {config['groq_model']}")
+
+        if os.getenv("DOCKER_MODEL_RUNNER_URL"):
+            config["docker_model_runner_url"] = os.getenv("DOCKER_MODEL_RUNNER_URL")
+            logger.info(f"Using DOCKER_MODEL_RUNNER_URL: {config['docker_model_runner_url']}")
+
+        if os.getenv("DOCKER_MODEL_RUNNER_MODEL"):
+            config["docker_model_runner_model"] = os.getenv("DOCKER_MODEL_RUNNER_MODEL")
+            logger.info(f"Using DOCKER_MODEL_RUNNER_MODEL: {config['docker_model_runner_model']}")
 
         if os.getenv("TAVILY_API_KEY"):
             config["tavily_api_key"] = os.getenv("TAVILY_API_KEY")
             logger.info("Using TAVILY_API_KEY from environment variable")
+
+        if os.getenv("CHROMA_HOST"):
+            config["chroma_host"] = os.getenv("CHROMA_HOST")
+            logger.info(f"Using CHROMA_HOST: {config['chroma_host']}")
+
+        if os.getenv("CHROMA_PORT"):
+            config["chroma_port"] = os.getenv("CHROMA_PORT")
+            logger.info(f"Using CHROMA_PORT: {config['chroma_port']}")
 
         # Override email settings with environment variables if present
         email_settings = config.get("email_settings", {})
@@ -84,8 +124,15 @@ class Config:
                 "recipient": "",
             },
             "groq_api_key": None,
-            "alpha_vantage_api_key": None,
+            "twelvedata_api_key": None,
             "tavily_api_key": None,
+            "chroma_host": None,
+            "chroma_port": "8000",
+            # LLM Provider Configuration
+            "llm_provider": "groq",  # Options: "groq" or "docker"
+            "groq_model": "openai/gpt-oss-120b",
+            "docker_model_runner_url": "http://localhost:12434/engines/v1",
+            "docker_model_runner_model": "ai/qwen2.5:latestQ4_0",
         }
         self.save_config(default_config)
         return default_config

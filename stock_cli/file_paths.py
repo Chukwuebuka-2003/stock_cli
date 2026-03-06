@@ -9,8 +9,8 @@ APP_AUTHOR = "Chukwuebuka Ezeokeke"
 # Linux: ~/.config/StockTrackerCLI
 # macOS: ~/Library/Application Support/StockTrackerCLI
 # Windows: C:\\Users\\<user>\\AppData\\Local\\YourAppName\\StockTrackerCLI
-CONFIG_DIR = user_config_dir(APP_NAME, APP_AUTHOR)
-DATA_DIR = user_data_dir(APP_NAME, APP_AUTHOR)
+CONFIG_DIR = user_config_dir(APP_NAME)
+DATA_DIR = user_data_dir(APP_NAME)
 
 # Ensure the directories exist
 os.makedirs(CONFIG_DIR, exist_ok=True)

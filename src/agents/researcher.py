@@ -16,14 +16,12 @@ class ResearchAgent(BaseAgent):
         self,
         model_client,
         vector_store=None,
-        alpha_vantage_key=None,
         tavily_api_key: Optional[str] = None,
         tavily_client: Optional[TavilyClient] = None,
         data_fetcher=None,
     ):
         super().__init__("ResearchAgent", model_client)
         self.vector_store = vector_store
-        self.alpha_vantage_key = alpha_vantage_key
         self.tavily_api_key = tavily_api_key or os.environ.get("TAVILY_API_KEY")
         self.tavily_client = tavily_client
         self.data_fetcher = data_fetcher

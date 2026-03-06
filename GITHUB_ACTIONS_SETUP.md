@@ -44,9 +44,9 @@ This repository includes three GitHub Actions workflows for automated stock port
    - Sign up at: https://console.groq.com
    - Free tier available
 
-2. **Alpha Vantage API Key** - For real-time stock price data
-   - Get free key at: https://www.alphavantage.co/support/#api-key
-   - Free tier: 25 requests/day
+2. **Twelve Data API Key** - For real-time stock price data
+   - Get free key at: https://twelvedata.com/
+   - Free tier: 800 requests/day
 
 3. **Tavily API Key** - For market event detection
    - Sign up at: https://tavily.com
@@ -75,7 +75,7 @@ Add the following secrets:
 #### API Keys
 ```
 GROQ_API_KEY=your_groq_api_key_here
-ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
+TWELVEDATA_API_KEY=your_twelvedata_api_key
 TAVILY_API_KEY=your_tavily_api_key_here
 ```
 
@@ -130,6 +130,21 @@ PORTFOLIO_POSITIONS=[{"symbol":"AAPL","quantity":10,"purchase_price":150.0},{"sy
 3. Select report type: `daily`
 4. Click **Run workflow**
 5. Wait for completion and check your email!
+
+### 4. Smart Reasoning (ChromaDB)
+
+The workflows are pre-configured with **Automated ChromaDB Service Containers**. 
+- No setup is required on your part!
+- Each run spins up a fresh, zero-cost Chroma server.
+- This allows AI-powered analysis to use technical background and portfolio history.
+
+### 5. Local AI Analysis (Optional)
+
+You can choose to use a local LLM instead of Groq for "all-free" reporting:
+- **Default:** The workflows use **Groq** (set `GROQ_API_KEY` in secrets).
+- **Local Mode:** To use the built-in model runner, set the GitHub Secret `LLM_PROVIDER` to `docker`.
+- **Model:** By default, it uses `ai/granite-4.0-micro:latest` (~1.81GB), which is optimized for GitHub Runners.
+- **Note:** Local AI analysis is slower than Groq but provides an entirely private, zero-cost solution.
 
 ---
 
@@ -286,10 +301,10 @@ print(result)
 
 ### API Rate Limits
 
-**Alpha Vantage (25 requests/day on free tier):**
+**Twelve Data (800 requests/day on free tier):**
 - Scheduled reports use ~1 request per stock per day
 - Cache is 15 minutes (900 seconds)
-- Consider upgrading for larger portfolios
+- Free tier is very generous for small portfolios
 
 **Tavily (1,000 credits/month on free tier):**
 - Event checks use ~2-10 credits per run
@@ -343,14 +358,14 @@ docker build -t stock-tracker:latest .
 # Run with your environment variables
 docker run --rm \
   -e GROQ_API_KEY="your_key" \
-  -e ALPHA_VANTAGE_API_KEY="your_key" \
+  -e TWELVEDATA_API_KEY="your_key" \
   -e PORTFOLIO_POSITIONS='[{"symbol":"AAPL","quantity":10,"purchase_price":150}]' \
   stock-tracker:latest ai-report
 
 # Test with email
 docker run --rm \
   -e GROQ_API_KEY="your_key" \
-  -e ALPHA_VANTAGE_API_KEY="your_key" \
+  -e TWELVEDATA_API_KEY="your_key" \
   -e EMAIL_SMTP_SERVER="smtp.gmail.com" \
   -e EMAIL_SMTP_PORT="587" \
   -e EMAIL_ADDRESS="your@gmail.com" \
@@ -427,7 +442,7 @@ Track your automation usage:
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Cron Schedule Expressions](https://crontab.guru)
 - [Groq API Documentation](https://console.groq.com/docs)
-- [Alpha Vantage API Docs](https://www.alphavantage.co/documentation/)
+- [Twelve Data API Docs](https://twelvedata.com/docs)
 - [Tavily API Documentation](https://docs.tavily.com)
 - [Gmail App Passwords Guide](https://support.google.com/accounts/answer/185833)
 

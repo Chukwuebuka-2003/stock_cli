@@ -28,6 +28,16 @@ on:
 jobs:
   generate-report:
     runs-on: ubuntu-latest
+    
+    services:
+      chroma:
+        image: chromadb/chroma:latest
+        ports:
+          - 8000:8000
+      model-runner:
+        image: ai/granite-4.0-micro:latest
+        ports:
+          - 12434:12434
 
     steps:
       - name: Checkout repository
@@ -62,9 +72,14 @@ jobs:
 
       - name: Generate and send AI-powered report
         env:
-          # API Keys
+          # AI/LLM Configuration
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'groq' }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+
+          # Local Model Runner Config (used if LLM_PROVIDER is 'docker')
+          DOCKER_MODEL_RUNNER_URL: http://localhost:12434/v1
+          DOCKER_MODEL_RUNNER_MODEL: ai/granite-4.0-micro:latest
 
           # Email Configuration
           EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
@@ -75,6 +90,10 @@ jobs:
 
           # Portfolio Data (injected from GitHub Secrets)
           PORTFOLIO_POSITIONS: ${{ secrets.PORTFOLIO_POSITIONS }}
+
+          # Chroma Configuration (using service container)
+          CHROMA_HOST: localhost
+          CHROMA_PORT: 8000
 
           # Report Type
           REPORT_TYPE: ${{ steps.report-type.outputs.type }}
